@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "Gayathri Coffee Storefront"
+description = "A warm, heritage-led ecommerce storefront for Gayathri Coffee with product discovery, cart interactions, and a tactile Mysore coffee story."
+version = "1.0.0"
+id = "artifacts/gayathri-coffee"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 25691
+
+[services.development]
+run = "pnpm --filter @workspace/gayathri-coffee run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/gayathri-coffee", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/gayathri-coffee/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "25691"
+BASE_PATH = "/"
