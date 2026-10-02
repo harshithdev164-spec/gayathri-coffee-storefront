@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 140 110">
+  <g>
+    <g transform="translate(30,30) rotate(-18)">
+      <ellipse rx="14" ry="9.5" fill="#67232d"/>
+      <path d="M0 -9.5C4 -4 4 4 0 9.5" fill="none" stroke="#c9a15a" stroke-width="2" stroke-linecap="round"/>
+    </g>
+    <g transform="translate(66,18) rotate(10)">
+      <ellipse rx="15" ry="10" fill="#8a5a2b"/>
+      <path d="M0 -10C4.2 -4.2 4.2 4.2 0 10" fill="none" stroke="#c9a15a" stroke-width="2" stroke-linecap="round"/>
+    </g>
+    <g transform="translate(104,32) rotate(-8)">
+      <ellipse rx="13" ry="9" fill="#67232d"/>
+      <path d="M0 -9C3.8 -4 3.8 4 0 9" fill="none" stroke="#c9a15a" stroke-width="2" stroke-linecap="round"/>
+    </g>
+    <g transform="translate(46,58) rotate(24)">
+      <ellipse rx="15" ry="10" fill="#8a5a2b"/>
+      <path d="M0 -10C4.2 -4.2 4.2 4.2 0 10" fill="none" stroke="#c9a15a" stroke-width="2" stroke-linecap="round"/>
+    </g>
+    <g transform="translate(84,62) rotate(-22)">
+      <ellipse rx="14" ry="9.5" fill="#67232d"/>
+      <path d="M0 -9.5C4 -4 4 4 0 9.5" fill="none" stroke="#c9a15a" stroke-width="2" stroke-linecap="round"/>
+    </g>
+    <g transform="translate(114,58) rotate(15)">
+      <ellipse rx="12" ry="8.5" fill="#8a5a2b"/>
+      <path d="M0 -8.5C3.6 -3.8 3.6 3.8 0 8.5" fill="none" stroke="#c9a15a" stroke-width="1.8" stroke-linecap="round"/>
+    </g>
+    <g transform="translate(18,80) rotate(6)">
+      <ellipse rx="13" ry="9" fill="#67232d"/>
+      <path d="M0 -9C3.8 -4 3.8 4 0 9" fill="none" stroke="#c9a15a" stroke-width="2" stroke-linecap="round"/>
+    </g>
+    <g transform="translate(64,90) rotate(-14)">
+      <ellipse rx="15" ry="10" fill="#8a5a2b"/>
+      <path d="M0 -10C4.2 -4.2 4.2 4.2 0 10" fill="none" stroke="#c9a15a" stroke-width="2" stroke-linecap="round"/>
+    </g>
+    <g transform="translate(102,86) rotate(20)">
+      <ellipse rx="13" ry="9" fill="#67232d"/>
+      <path d="M0 -9C3.8 -4 3.8 4 0 9" fill="none" stroke="#c9a15a" stroke-width="2" stroke-linecap="round"/>
+    </g>
+  </g>
+</svg>

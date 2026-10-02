@@ -10,6 +10,22 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: admin
+    description: Admin authentication
+  - name: products
+    description: Product catalog
+  - name: admin-products
+    description: Admin product management
+  - name: shipping
+    description: Shipping settings
+  - name: orders
+    description: Customer orders
+  - name: admin-orders
+    description: Admin order management
+  - name: payment
+    description: Payment gateway
+  - name: admin-stats
+    description: Admin analytics dashboard
 paths:
   /healthz:
     get:
@@ -24,6 +40,497 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /admin/login:
+    post:
+      operationId: adminLogin
+      tags: [admin]
+      summary: Admin login
+      description: Authenticates an admin user and sets a session cookie
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminLoginRequest"
+      responses:
+        "200":
+          description: Logged in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminMe"
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /admin/logout:
+    post:
+      operationId: adminLogout
+      tags: [admin]
+      summary: Admin logout
+      description: Clears the admin session cookie
+      responses:
+        "200":
+          description: Logged out
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ok"
+  /admin/me:
+    get:
+      operationId: adminMe
+      tags: [admin]
+      summary: Current admin session
+      description: Returns the logged-in admin, or 401 if not authenticated
+      responses:
+        "200":
+          description: Current admin
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminMe"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /products:
+    get:
+      operationId: listProducts
+      tags: [products]
+      summary: List active products
+      description: Returns all active products with their variants and images
+      responses:
+        "200":
+          description: Products
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProductWithDetails"
+  /admin/products:
+    get:
+      operationId: adminListProducts
+      tags: [admin-products]
+      summary: List all products (admin)
+      description: Returns every product, including inactive ones
+      responses:
+        "200":
+          description: Products
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProductWithDetails"
+    post:
+      operationId: adminCreateProduct
+      tags: [admin-products]
+      summary: Create a product
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductWithDetails"
+  /admin/products/{id}:
+    patch:
+      operationId: adminUpdateProduct
+      tags: [admin-products]
+      summary: Update a product (fields + full variant list)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductInput"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductWithDetails"
+    delete:
+      operationId: adminDeleteProduct
+      tags: [admin-products]
+      summary: Delete a product
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ok"
+  /admin/uploads/presign:
+    post:
+      operationId: adminPresignUpload
+      tags: [admin-products]
+      summary: Get a presigned URL to upload a product image
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PresignUploadRequest"
+      responses:
+        "200":
+          description: Presigned URL
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PresignUploadResponse"
+  /admin/products/{id}/images:
+    post:
+      operationId: adminAddProductImage
+      tags: [admin-products]
+      summary: Attach an uploaded image to a product
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddProductImageRequest"
+      responses:
+        "201":
+          description: Added
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductImage"
+  /admin/products/{id}/images/{imageId}:
+    delete:
+      operationId: adminDeleteProductImage
+      tags: [admin-products]
+      summary: Remove a product image
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: imageId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ok"
+  /shipping-settings:
+    get:
+      operationId: getShippingSettings
+      tags: [shipping]
+      summary: Get public shipping settings
+      description: Returns the India Post rate card and free-delivery threshold
+      responses:
+        "200":
+          description: Shipping settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShippingSettings"
+  /shipping/india-post-rate:
+    get:
+      operationId: getIndiaPostRate
+      tags: [shipping]
+      summary: Get an India Post shipping quote
+      description: Uses the live India Post tariff API when connected; otherwise falls back to the admin-set rate card
+      parameters:
+        - name: pincode
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: weightGrams
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Quote
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IndiaPostRateQuote"
+  /shipping/shiprocket-rate:
+    get:
+      operationId: getShiprocketRate
+      tags: [shipping]
+      summary: Get a live Shiprocket shipping quote
+      description: Uses Shiprocket's own courier serviceability/rate calculator; falls back to a flat estimate if Shiprocket isn't connected or no courier is serviceable
+      parameters:
+        - name: pincode
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: weightGrams
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: cod
+          in: query
+          required: false
+          description: Whether the order would be paid Cash on Delivery
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: Quote
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShiprocketRateQuote"
+  /admin/settings:
+    get:
+      operationId: adminGetSettings
+      tags: [admin-orders]
+      summary: Get shipping settings (admin)
+      responses:
+        "200":
+          description: Settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShippingSettings"
+    patch:
+      operationId: adminUpdateSettings
+      tags: [admin-orders]
+      summary: Update shipping settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ShippingSettings"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShippingSettings"
+  /payment/settings:
+    get:
+      operationId: getPaymentSettings
+      tags: [payment]
+      summary: Get public payment gateway settings
+      description: Tells the frontend whether Razorpay is configured, and its public key id
+      responses:
+        "200":
+          description: Settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentSettings"
+  /payment/razorpay-order:
+    post:
+      operationId: createRazorpayOrder
+      tags: [payment]
+      summary: Create a Razorpay order for checkout
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RazorpayOrderRequest"
+      responses:
+        "200":
+          description: Razorpay order created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RazorpayOrderResponse"
+  /admin/stats:
+    get:
+      operationId: adminGetStats
+      tags: [admin-stats]
+      summary: Analytics dashboard data
+      description: Aggregated order/product stats for the admin analytics dashboard
+      parameters:
+        - name: from
+          in: query
+          required: false
+          description: ISO date, inclusive. Omit for all-time.
+          schema:
+            type: string
+        - name: to
+          in: query
+          required: false
+          description: ISO date, inclusive. Omit for all-time.
+          schema:
+            type: string
+        - name: granularity
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [day, week, month]
+      responses:
+        "200":
+          description: Stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminStatsResponse"
+  /orders:
+    post:
+      operationId: createOrder
+      tags: [orders]
+      summary: Place an order
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrderInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderWithItems"
+  /admin/orders:
+    get:
+      operationId: adminListOrders
+      tags: [admin-orders]
+      summary: List orders (admin)
+      responses:
+        "200":
+          description: Orders
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/OrderWithItems"
+  /admin/orders/{id}/ship:
+    post:
+      operationId: adminShipOrder
+      tags: [admin-orders]
+      summary: Create a Shiprocket shipment for this order
+      description: Requires SHIPROCKET_EMAIL/SHIPROCKET_PASSWORD to be configured on the server
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Shipment created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderWithItems"
+  /admin/orders/{id}:
+    patch:
+      operationId: adminUpdateOrder
+      tags: [admin-orders]
+      summary: Update order status / tracking
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrderUpdateInput"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderWithItems"
+  /admin/packing-recipients:
+    get:
+      operationId: adminListPackingRecipients
+      tags: [admin-packing-recipients]
+      summary: List people who get a WhatsApp alert for every new order (packing team)
+      responses:
+        "200":
+          description: Recipients
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PackingRecipientList"
+    post:
+      operationId: adminCreatePackingRecipient
+      tags: [admin-packing-recipients]
+      summary: Add a packing-team WhatsApp recipient
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PackingRecipientInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PackingRecipient"
+  /admin/packing-recipients/{id}:
+    delete:
+      operationId: adminDeletePackingRecipient
+      tags: [admin-packing-recipients]
+      summary: Remove a packing-team WhatsApp recipient
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PackingRecipientDeleteResult"
 components:
   schemas:
     HealthStatus:
@@ -33,4 +540,663 @@ components:
           type: string
       required:
         - status
+    Ok:
+      type: object
+      properties:
+        ok:
+          type: boolean
+      required:
+        - ok
+    ApiError:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error
+    AdminLoginRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+      required:
+        - email
+        - password
+    AdminMe:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+      required:
+        - email
+    ProductVariant:
+      type: object
+      properties:
+        id:
+          type: string
+        weightGrams:
+          type: integer
+        price:
+          type: integer
+        sku:
+          type: string
+          nullable: true
+        stockQty:
+          type: integer
+        isDefault:
+          type: boolean
+      required:
+        - id
+        - weightGrams
+        - price
+        - stockQty
+        - isDefault
+    ProductImage:
+      type: object
+      properties:
+        id:
+          type: string
+        url:
+          type: string
+        sortOrder:
+          type: integer
+        isPrimary:
+          type: boolean
+      required:
+        - id
+        - url
+        - sortOrder
+        - isPrimary
+    ProductWithDetails:
+      type: object
+      properties:
+        id:
+          type: string
+        slug:
+          type: string
+        name:
+          type: string
+        shortName:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+        roast:
+          type: string
+        notes:
+          type: string
+        badge:
+          type: string
+          nullable: true
+        active:
+          type: boolean
+        variants:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProductVariant"
+        images:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProductImage"
+      required:
+        - id
+        - slug
+        - name
+        - shortName
+        - description
+        - category
+        - roast
+        - notes
+        - active
+        - variants
+        - images
+    ProductVariantInput:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Omit for a new variant
+        weightGrams:
+          type: integer
+        price:
+          type: integer
+        sku:
+          type: string
+          nullable: true
+        stockQty:
+          type: integer
+        isDefault:
+          type: boolean
+      required:
+        - weightGrams
+        - price
+        - stockQty
+        - isDefault
+    ProductInput:
+      type: object
+      properties:
+        slug:
+          type: string
+        name:
+          type: string
+        shortName:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+        roast:
+          type: string
+        notes:
+          type: string
+        badge:
+          type: string
+          nullable: true
+        active:
+          type: boolean
+        variants:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProductVariantInput"
+      required:
+        - slug
+        - name
+        - shortName
+        - description
+        - category
+        - roast
+        - notes
+        - active
+        - variants
+    PresignUploadRequest:
+      type: object
+      properties:
+        filename:
+          type: string
+        contentType:
+          type: string
+      required:
+        - filename
+        - contentType
+    PresignUploadResponse:
+      type: object
+      properties:
+        uploadUrl:
+          type: string
+        objectKey:
+          type: string
+        publicUrl:
+          type: string
+      required:
+        - uploadUrl
+        - objectKey
+        - publicUrl
+    AddProductImageRequest:
+      type: object
+      properties:
+        objectKey:
+          type: string
+        isPrimary:
+          type: boolean
+      required:
+        - objectKey
+        - isPrimary
+    IndiaPostRateQuote:
+      type: object
+      properties:
+        amount:
+          type: integer
+        source:
+          type: string
+          enum: [india_post_api, rate_card]
+      required:
+        - amount
+        - source
+    ShiprocketRateQuote:
+      type: object
+      properties:
+        amount:
+          type: integer
+        source:
+          type: string
+          enum: [shiprocket_api, flat_estimate]
+        etd:
+          type: string
+          nullable: true
+          description: Estimated delivery date, as returned by Shiprocket
+        courierName:
+          type: string
+          nullable: true
+      required:
+        - amount
+        - source
+        - etd
+        - courierName
+    RateTier:
+      type: object
+      properties:
+        weightGrams:
+          type: integer
+        price:
+          type: integer
+      required:
+        - weightGrams
+        - price
+    ShippingSettings:
+      type: object
+      properties:
+        indiaPostRateTable:
+          type: array
+          items:
+            $ref: "#/components/schemas/RateTier"
+        freeDeliveryThreshold:
+          type: integer
+      required:
+        - indiaPostRateTable
+        - freeDeliveryThreshold
+    PackingRecipient:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        phone:
+          type: string
+        createdAt:
+          type: string
+      required:
+        - id
+        - name
+        - phone
+        - createdAt
+    PackingRecipientInput:
+      type: object
+      properties:
+        name:
+          type: string
+        phone:
+          type: string
+      required:
+        - name
+        - phone
+    PackingRecipientList:
+      type: array
+      items:
+        $ref: "#/components/schemas/PackingRecipient"
+    PackingRecipientDeleteResult:
+      type: object
+      properties:
+        ok:
+          type: boolean
+      required:
+        - ok
+    OrderItemInput:
+      type: object
+      properties:
+        productVariantId:
+          type: string
+          nullable: true
+        name:
+          type: string
+        price:
+          type: integer
+        quantity:
+          type: integer
+      required:
+        - name
+        - price
+        - quantity
+    OrderInput:
+      type: object
+      properties:
+        customerName:
+          type: string
+        phone:
+          type: string
+        email:
+          type: string
+          nullable: true
+        address:
+          type: string
+        city:
+          type: string
+        pincode:
+          type: string
+        notes:
+          type: string
+          nullable: true
+        subtotal:
+          type: integer
+        shippingMethod:
+          type: string
+          enum: [shiprocket, india_post]
+        shippingFee:
+          type: integer
+        total:
+          type: integer
+        paymentMethod:
+          type: string
+        razorpayOrderId:
+          type: string
+          description: Present when paid via Razorpay; verified server-side before the order is created
+        razorpayPaymentId:
+          type: string
+        razorpaySignature:
+          type: string
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrderItemInput"
+      required:
+        - customerName
+        - phone
+        - address
+        - city
+        - pincode
+        - subtotal
+        - shippingMethod
+        - shippingFee
+        - total
+        - paymentMethod
+        - items
+    OrderItemOutput:
+      type: object
+      properties:
+        id:
+          type: string
+        productVariantId:
+          type: string
+          nullable: true
+        name:
+          type: string
+        price:
+          type: integer
+        quantity:
+          type: integer
+      required:
+        - id
+        - name
+        - price
+        - quantity
+    OrderWithItems:
+      type: object
+      properties:
+        id:
+          type: string
+        orderNumber:
+          type: string
+        customerName:
+          type: string
+        phone:
+          type: string
+        email:
+          type: string
+          nullable: true
+        address:
+          type: string
+        city:
+          type: string
+        pincode:
+          type: string
+        notes:
+          type: string
+          nullable: true
+        subtotal:
+          type: integer
+        shippingMethod:
+          type: string
+        shippingFee:
+          type: integer
+        total:
+          type: integer
+        paymentMethod:
+          type: string
+        paymentStatus:
+          type: string
+        status:
+          type: string
+        trackingNumber:
+          type: string
+          nullable: true
+        trackingUrl:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrderItemOutput"
+      required:
+        - id
+        - orderNumber
+        - customerName
+        - phone
+        - address
+        - city
+        - pincode
+        - subtotal
+        - shippingMethod
+        - shippingFee
+        - total
+        - paymentMethod
+        - paymentStatus
+        - status
+        - createdAt
+        - items
+    OrderUpdateInput:
+      type: object
+      properties:
+        status:
+          type: string
+        trackingNumber:
+          type: string
+          nullable: true
+        trackingUrl:
+          type: string
+          nullable: true
+    PaymentSettings:
+      type: object
+      properties:
+        razorpayEnabled:
+          type: boolean
+        keyId:
+          type: string
+          nullable: true
+      required:
+        - razorpayEnabled
+        - keyId
+    RazorpayOrderRequest:
+      type: object
+      properties:
+        amount:
+          type: integer
+          description: Rupees (not paise)
+      required:
+        - amount
+    RazorpayOrderResponse:
+      type: object
+      properties:
+        razorpayOrderId:
+          type: string
+      required:
+        - razorpayOrderId
+    AdminStatsKpi:
+      type: object
+      properties:
+        value:
+          type: number
+        previousValue:
+          type: number
+        deltaPct:
+          type: number
+          nullable: true
+      required:
+        - value
+        - previousValue
+        - deltaPct
+    AdminStatsKpis:
+      type: object
+      properties:
+        totalOrders:
+          $ref: "#/components/schemas/AdminStatsKpi"
+        totalRevenue:
+          $ref: "#/components/schemas/AdminStatsKpi"
+        avgOrderValue:
+          $ref: "#/components/schemas/AdminStatsKpi"
+        totalUnitsSold:
+          $ref: "#/components/schemas/AdminStatsKpi"
+      required:
+        - totalOrders
+        - totalRevenue
+        - avgOrderValue
+        - totalUnitsSold
+    AdminStatsTimeSeriesPoint:
+      type: object
+      properties:
+        bucket:
+          type: string
+        orders:
+          type: integer
+        revenue:
+          type: integer
+      required:
+        - bucket
+        - orders
+        - revenue
+    AdminStatsTopProduct:
+      type: object
+      properties:
+        name:
+          type: string
+        unitsSold:
+          type: integer
+        revenue:
+          type: integer
+      required:
+        - name
+        - unitsSold
+        - revenue
+    AdminStatsStatusCount:
+      type: object
+      properties:
+        status:
+          type: string
+        count:
+          type: integer
+      required:
+        - status
+        - count
+    AdminStatsPaymentMethod:
+      type: object
+      properties:
+        method:
+          type: string
+        count:
+          type: integer
+        revenue:
+          type: integer
+      required:
+        - method
+        - count
+        - revenue
+    AdminStatsCategory:
+      type: object
+      properties:
+        category:
+          type: string
+        revenue:
+          type: integer
+      required:
+        - category
+        - revenue
+    AdminStatsCity:
+      type: object
+      properties:
+        city:
+          type: string
+        orders:
+          type: integer
+        revenue:
+          type: integer
+      required:
+        - city
+        - orders
+        - revenue
+    AdminStatsWeekday:
+      type: object
+      properties:
+        weekday:
+          type: string
+        orders:
+          type: integer
+      required:
+        - weekday
+        - orders
+    AdminStatsLowStockItem:
+      type: object
+      properties:
+        productName:
+          type: string
+        variantLabel:
+          type: string
+        stockQty:
+          type: integer
+      required:
+        - productName
+        - variantLabel
+        - stockQty
+    AdminStatsResponse:
+      type: object
+      properties:
+        kpis:
+          $ref: "#/components/schemas/AdminStatsKpis"
+        timeSeries:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminStatsTimeSeriesPoint"
+        topProducts:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminStatsTopProduct"
+        ordersByStatus:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminStatsStatusCount"
+        paymentMethodBreakdown:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminStatsPaymentMethod"
+        categoryBreakdown:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminStatsCategory"
+        topCities:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminStatsCity"
+        ordersByWeekday:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminStatsWeekday"
+        lowStock:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminStatsLowStockItem"
+      required:
+        - kpis
+        - timeSeries
+        - topProducts
+        - ordersByStatus
+        - paymentMethodBreakdown
+        - categoryBreakdown
+        - topCities
+        - ordersByWeekday
+        - lowStock
 
