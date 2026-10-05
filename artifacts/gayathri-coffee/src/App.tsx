@@ -903,7 +903,9 @@ function Storefront({ onSwitchBrand }: { onSwitchBrand: (originX: string, origin
           <div><p className="mono text-[10px] uppercase tracking-[.18em] text-[#9a7564]">Visit</p><div className="mt-4 space-y-2 text-sm leading-relaxed text-[#67232d]"><p>Gayathri Coffee Works</p><p>Duplin Complex, Shivram­pet</p><p>Mysore — 570 001</p></div></div>
           <div><p className="mono text-[10px] uppercase tracking-[.18em] text-[#9a7564]">Say hello</p><a href="mailto:hello@gayathricoffee.in" className="mt-4 block text-sm text-[#67232d] hover:text-[#b83a36]" data-testid="link-email">hello@gayathricoffee.in</a><a href="https://www.instagram.com" target="_blank" rel="noreferrer" className="mt-5 inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[.12em] text-[#b83a36]" data-testid="link-instagram"><Instagram size={16} /> Instagram</a></div>
         </div>
-        <div className="border-t border-[#decdb9] px-5 py-5 text-center text-[10px] uppercase tracking-[.12em] text-[#9a7564] sm:px-8 lg:px-12">© 2024 Gayathri Coffee Works · Quality is our motto</div>
+        <div className="border-t border-[#decdb9] px-5 py-5 text-center text-[10px] uppercase tracking-[.12em] text-[#9a7564] sm:px-8 lg:px-12">
+          © 2024 Gayathri Coffee Works · Quality is our motto · <a href="/privacy-policy" className="hover:text-[#b83a36]" data-testid="link-privacy-policy">Privacy Policy</a>
+        </div>
       </footer>
 
       {createPortal(<CartDrawer items={cart} open={cartOpen} onClose={() => setCartOpen(false)} onChange={changeQuantity} onRemove={(id) => setCart((current) => current.filter((item) => item.product.id !== id))} onCheckout={() => { setCartOpen(false); navigate('/checkout'); }} />, document.body)}
@@ -2061,6 +2063,147 @@ function CheckoutPage() {
   );
 }
 
+function PrivacyPolicyPage() {
+  const [, navigate] = useLocation();
+  useEffect(() => { window.scrollTo(0, 0); }, []);
+
+  const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
+    <div className="mt-8">
+      <h2 className="serif text-xl text-[#67232d]">{title}</h2>
+      <div className="mt-3 space-y-3 text-sm leading-[1.75] text-[#775e53]">{children}</div>
+    </div>
+  );
+
+  return (
+    <div className="min-h-[100dvh] bg-[#fdf8f1] text-[#67232d]">
+      <header className="sticky top-0 z-30 border-b border-[#decdb9] bg-[#fdf8f1]/95 backdrop-blur-sm">
+        <div className="mx-auto flex max-w-[1100px] items-center justify-between px-5 py-4 sm:px-8">
+          <button type="button" onClick={() => navigate('/')} className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[.14em] text-[#775e53] transition-colors hover:text-[#b83a36]" data-testid="button-back-to-shop">
+            <ArrowRight size={14} className="rotate-180" /> Back to shop
+          </button>
+          <img src={logoPath} alt="Gayathri Coffee" className="h-10 w-auto object-contain" />
+          <div className="w-[92px]" />
+        </div>
+      </header>
+
+      <section className="mx-auto max-w-[760px] px-5 py-10 sm:px-8 lg:px-0">
+        <p className="mono text-[10px] uppercase tracking-[.22em] text-[#c9a15a]">Legal</p>
+        <h1 className="serif mt-2 text-3xl text-[#67232d] sm:text-4xl">Privacy Policy</h1>
+        <p className="mt-3 text-sm text-[#9a7564]">Last updated: 5 October 2026</p>
+
+        <p className="mt-6 text-sm leading-[1.75] text-[#775e53]">
+          Gayathri Coffee Works (&ldquo;we&rdquo;, &ldquo;us&rdquo;, &ldquo;our&rdquo;) operates gayathricoffee.com. This policy explains what
+          information we collect when you shop with us, how we use it, and the choices you have — including about WhatsApp messages we send
+          you about your orders.
+        </p>
+
+        <Section title="1. Information we collect">
+          <p>When you place an order or contact us, we collect:</p>
+          <ul className="list-disc space-y-1.5 pl-5">
+            <li>Contact details — name, phone number, email address</li>
+            <li>Shipping and billing address, including city, state and pincode</li>
+            <li>Order details — items purchased, quantities, prices, and delivery preferences</li>
+            <li>Payment confirmation data from our payment processor (we never see or store your card, UPI PIN, or bank details ourselves)</li>
+          </ul>
+          <p>We do not knowingly collect any information beyond what is needed to process and deliver your order.</p>
+        </Section>
+
+        <Section title="2. How we use your information">
+          <ul className="list-disc space-y-1.5 pl-5">
+            <li>To process, pack, and ship your order</li>
+            <li>To send order confirmations, shipping updates, and invoices by email and WhatsApp</li>
+            <li>To calculate shipping charges and applicable taxes (GST) based on your delivery location</li>
+            <li>To respond to questions or support requests you send us</li>
+            <li>To meet our legal and tax record-keeping obligations</li>
+          </ul>
+        </Section>
+
+        <Section title="3. WhatsApp messages (Meta Platform)">
+          <p>
+            We use the WhatsApp Business Platform, provided by Meta, to send transactional order updates to the phone number you give us at
+            checkout. This includes:
+          </p>
+          <ul className="list-disc space-y-1.5 pl-5">
+            <li>Order confirmation, with your order number and total</li>
+            <li>Shipping updates, including tracking information once your order leaves our roastery</li>
+          </ul>
+          <p>
+            These are transactional messages tied directly to an order you placed — we do not use WhatsApp for marketing or promotional
+            messages, and we do not share your phone number with any third party for their own marketing purposes. Meta processes these
+            messages on our behalf as our service provider, under its own{' '}
+            <a href="https://www.whatsapp.com/legal/business-data-processing-terms" target="_blank" rel="noreferrer" className="text-[#b83a36] underline">
+              WhatsApp Business Data Processing Terms
+            </a>.
+          </p>
+          <p>If you&apos;d rather not receive order updates over WhatsApp, email us at the address below and we&apos;ll note that on your account.</p>
+        </Section>
+
+        <Section title="4. Payments">
+          <p>
+            Payments are processed securely by Razorpay. When you pay, your card/UPI/bank details are sent directly to Razorpay over an
+            encrypted connection — they never pass through or get stored on our servers. We only receive confirmation that a payment
+            succeeded, along with a payment reference ID.
+          </p>
+        </Section>
+
+        <Section title="5. Shipping partners">
+          <p>
+            To deliver your order, we share your name, phone number, and delivery address with our shipping partners — Shiprocket and
+            India Post — solely for the purpose of dispatching and delivering your package.
+          </p>
+        </Section>
+
+        <Section title="6. Data storage and security">
+          <p>
+            Your order data is stored on secure, encrypted cloud infrastructure. We use industry-standard practices to protect it, including
+            encrypted connections (HTTPS) across our website and restricted access to customer data within our team.
+          </p>
+        </Section>
+
+        <Section title="7. Data retention">
+          <p>
+            We retain order records for as long as required under Indian tax and accounting law (currently a minimum of 8 years for GST
+            purposes), and for as long as needed to resolve any disputes or support requests.
+          </p>
+        </Section>
+
+        <Section title="8. Your rights">
+          <p>You can ask us to:</p>
+          <ul className="list-disc space-y-1.5 pl-5">
+            <li>Tell you what personal information we hold about you</li>
+            <li>Correct inaccurate information</li>
+            <li>Delete your information, subject to our legal record-keeping obligations</li>
+            <li>Stop sending you WhatsApp or email updates</li>
+          </ul>
+          <p>To exercise any of these, contact us using the details below.</p>
+        </Section>
+
+        <Section title="9. Children's privacy">
+          <p>Our website is not directed at children under 18, and we do not knowingly collect personal information from children.</p>
+        </Section>
+
+        <Section title="10. Changes to this policy">
+          <p>We may update this policy from time to time. The &ldquo;Last updated&rdquo; date at the top reflects the most recent changes.</p>
+        </Section>
+
+        <Section title="11. Contact us">
+          <p>
+            Gayathri Coffee Works<br />
+            33B, Belavadi Industrial Area, Yalawala Hobli, Mysore<br />
+            No 7, Duplin Complex, Shivarampet, Mysore — 570001, Karnataka, India<br />
+            Phone: 0821 2420328, +91-9141737288<br />
+            Email: <a href="mailto:hello@gayathricoffee.in" className="text-[#b83a36] underline">hello@gayathricoffee.in</a>
+          </p>
+        </Section>
+      </section>
+
+      <footer className="border-t border-[#c9a15a]/15 py-8 text-center">
+        <p className="mono text-[10px] uppercase tracking-[.12em] text-[#9a7564]">© 2026 Gayathri Coffee Works · Quality is our motto</p>
+      </footer>
+    </div>
+  );
+}
+
 function Router() {
   return (
     <ErrorBoundary>
@@ -2068,6 +2211,7 @@ function Router() {
         <Route path="/" component={BrandExperience} />
         <Route path="/custom-roast" component={CustomRoastPage} />
         <Route path="/checkout" component={CheckoutPage} />
+        <Route path="/privacy-policy" component={PrivacyPolicyPage} />
         <Route path="/admin/login" component={AdminLoginPage} />
         <Route path="/admin" component={AdminPage} />
         <Route component={BrandExperience} />

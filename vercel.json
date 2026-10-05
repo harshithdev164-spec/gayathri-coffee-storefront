@@ -9,6 +9,7 @@
     { "source": "/", "destination": "/index.html" },
     { "source": "/custom-roast", "destination": "/index.html" },
     { "source": "/checkout", "destination": "/index.html" },
+    { "source": "/privacy-policy", "destination": "/index.html" },
     { "source": "/admin/login", "destination": "/index.html" },
     { "source": "/admin", "destination": "/index.html" }
   ]
