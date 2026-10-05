@@ -36,7 +36,15 @@ app.use(
   }),
 );
 app.use(cors({ origin: true, credentials: true }));
-app.use(express.json());
+app.use(
+  express.json({
+    // Razorpay signs the exact raw request body — keep it around so the
+    // webhook route can verify the signature byte-for-byte.
+    verify: (req, _res, buf) => {
+      req.rawBody = buf;
+    },
+  }),
+);
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser(process.env.ADMIN_SESSION_SECRET));
 

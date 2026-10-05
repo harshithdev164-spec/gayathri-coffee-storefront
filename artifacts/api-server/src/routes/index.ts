@@ -10,6 +10,7 @@ import adminOrdersRouter from "./admin/orders";
 import paymentRouter from "./payment";
 import adminStatsRouter from "./admin/stats";
 import adminPackingRecipientsRouter from "./admin/packing-recipients";
+import webhooksRouter from "./webhooks";
 
 const router: IRouter = Router();
 
@@ -19,6 +20,7 @@ router.use(productsRouter);
 router.use(settingsRouter);
 router.use(ordersRouter);
 router.use(paymentRouter);
+router.use(webhooksRouter);
 
 // These routers gate themselves with `requireAdmin` — mounting them under an
 // explicit /admin prefix (instead of bare `.use(...)`) ensures that gate only

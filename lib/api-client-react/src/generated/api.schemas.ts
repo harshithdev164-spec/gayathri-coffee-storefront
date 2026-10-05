@@ -26,6 +26,19 @@ export interface AdminMe {
   email: string;
 }
 
+export interface OtpRequestInput {
+  email: string;
+}
+
+export interface OtpSentResult {
+  sent: boolean;
+}
+
+export interface OtpVerifyInput {
+  email: string;
+  code: string;
+}
+
 export interface ProductVariant {
   id: string;
   weightGrams: number;
@@ -175,6 +188,13 @@ export interface OrderInput {
   address: string;
   city: string;
   pincode: string;
+  /** Shipping state — determines CGST+SGST vs IGST on the invoice */
+  state?: string | null;
+  /** Only set when billing address differs from the shipping address above */
+  billingAddress?: string | null;
+  billingCity?: string | null;
+  billingPincode?: string | null;
+  billingState?: string | null;
   notes?: string | null;
   subtotal: number;
   shippingMethod: OrderInputShippingMethod;
@@ -205,6 +225,11 @@ export interface OrderWithItems {
   address: string;
   city: string;
   pincode: string;
+  state?: string | null;
+  billingAddress?: string | null;
+  billingCity?: string | null;
+  billingPincode?: string | null;
+  billingState?: string | null;
   notes?: string | null;
   subtotal: number;
   shippingMethod: string;

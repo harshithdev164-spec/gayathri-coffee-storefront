@@ -1,6 +1,7 @@
 import { useEffect, useState, type CSSProperties } from 'react';
 import { useLocation } from 'wouter';
 import { useQueryClient } from '@tanstack/react-query';
+import * as XLSX from 'xlsx';
 import { Plus, Trash2, X, Check, LogOut, ImagePlus, Package, Truck, Settings as SettingsIcon, BarChart3, MapPin, Phone, StickyNote, ExternalLink, Send } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -19,6 +20,8 @@ import {
 } from 'recharts';
 import {
   useAdminLogin,
+  useAdminRequestOtp,
+  useAdminVerifyOtp,
   useAdminLogout,
   useAdminMe,
   useAdminListProducts,
@@ -127,20 +130,43 @@ function AdminHeader({ email }: { email: string }) {
   );
 }
 
+type LoginMethod = 'password' | 'otp';
+type OtpStage = 'request' | 'verify';
+
 export function AdminLoginPage() {
   const [, navigate] = useLocation();
+  const [method, setMethod] = useState<LoginMethod>('password');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [otpStage, setOtpStage] = useState<OtpStage>('request');
+  const [code, setCode] = useState('');
+  const [otpNotice, setOtpNotice] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
-  const login = useAdminLogin({
+  const onAuthenticated = (data: { email: string }) => {
+    queryClient.setQueryData(getAdminMeQueryKey(), data);
+    navigate('/admin');
+  };
+
+  const login = useAdminLogin({ mutation: { onSuccess: onAuthenticated } });
+
+  const requestOtp = useAdminRequestOtp({
     mutation: {
       onSuccess: (data) => {
-        queryClient.setQueryData(getAdminMeQueryKey(), data);
-        navigate('/admin');
+        setOtpStage('verify');
+        setOtpNotice(data.sent ? 'Code sent — check WhatsApp.' : "Couldn't send a code to that account. Try password sign-in instead.");
       },
     },
   });
+
+  const verifyOtp = useAdminVerifyOtp({ mutation: { onSuccess: onAuthenticated } });
+
+  const switchMethod = (next: LoginMethod) => {
+    setMethod(next);
+    setOtpStage('request');
+    setCode('');
+    setOtpNotice(null);
+  };
 
   return (
     <AdminShell>
@@ -148,45 +174,137 @@ export function AdminLoginPage() {
         <div className="w-full max-w-[380px] rounded-[1.5rem] border border-[#decdb9] bg-white p-8">
           <img src={logoPath} alt="" className="mx-auto h-14 w-14 rounded-full object-cover" />
           <h1 className="serif mt-4 text-center text-2xl text-[#67232d]">Admin sign in</h1>
-          <form
-            className="mt-6 space-y-4"
-            onSubmit={(event) => {
-              event.preventDefault();
-              login.mutate({ data: { email, password } });
-            }}
-          >
-            <label className="block">
-              <span className="mono text-[10px] uppercase tracking-[.14em] text-[#9a7564]">Email</span>
-              <input
-                type="email"
-                required
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                className="mt-2 w-full border-b border-[#decdb9] bg-transparent py-2 text-sm text-[#67232d] outline-none"
-                data-testid="input-admin-email"
-              />
-            </label>
-            <label className="block">
-              <span className="mono text-[10px] uppercase tracking-[.14em] text-[#9a7564]">Password</span>
-              <input
-                type="password"
-                required
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                className="mt-2 w-full border-b border-[#decdb9] bg-transparent py-2 text-sm text-[#67232d] outline-none"
-                data-testid="input-admin-password"
-              />
-            </label>
-            {login.isError ? <p className="text-xs text-[#b83a36]">Invalid email or password.</p> : null}
+
+          <div className="mt-6 flex rounded-full border border-[#decdb9] p-1 text-xs font-semibold uppercase tracking-[.1em]">
             <button
-              type="submit"
-              disabled={login.isPending}
-              className="w-full rounded-full bg-[#67232d] px-5 py-3 text-sm font-semibold uppercase tracking-[.12em] text-[#f9e7c5] disabled:opacity-60"
-              data-testid="button-admin-login-submit"
+              type="button"
+              onClick={() => switchMethod('password')}
+              className={`flex-1 rounded-full py-2 ${method === 'password' ? 'bg-[#67232d] text-[#f9e7c5]' : 'text-[#9a7564]'}`}
+              data-testid="button-login-method-password"
             >
-              {login.isPending ? 'Signing in…' : 'Sign in'}
+              Password
             </button>
-          </form>
+            <button
+              type="button"
+              onClick={() => switchMethod('otp')}
+              className={`flex-1 rounded-full py-2 ${method === 'otp' ? 'bg-[#67232d] text-[#f9e7c5]' : 'text-[#9a7564]'}`}
+              data-testid="button-login-method-otp"
+            >
+              WhatsApp code
+            </button>
+          </div>
+
+          {method === 'password' ? (
+            <form
+              className="mt-6 space-y-4"
+              onSubmit={(event) => {
+                event.preventDefault();
+                login.mutate({ data: { email, password } });
+              }}
+            >
+              <label className="block">
+                <span className="mono text-[10px] uppercase tracking-[.14em] text-[#9a7564]">Email</span>
+                <input
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  className="mt-2 w-full border-b border-[#decdb9] bg-transparent py-2 text-sm text-[#67232d] outline-none"
+                  data-testid="input-admin-email"
+                />
+              </label>
+              <label className="block">
+                <span className="mono text-[10px] uppercase tracking-[.14em] text-[#9a7564]">Password</span>
+                <input
+                  type="password"
+                  required
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  className="mt-2 w-full border-b border-[#decdb9] bg-transparent py-2 text-sm text-[#67232d] outline-none"
+                  data-testid="input-admin-password"
+                />
+              </label>
+              {login.isError ? <p className="text-xs text-[#b83a36]">Invalid email or password.</p> : null}
+              <button
+                type="submit"
+                disabled={login.isPending}
+                className="w-full rounded-full bg-[#67232d] px-5 py-3 text-sm font-semibold uppercase tracking-[.12em] text-[#f9e7c5] disabled:opacity-60"
+                data-testid="button-admin-login-submit"
+              >
+                {login.isPending ? 'Signing in…' : 'Sign in'}
+              </button>
+            </form>
+          ) : otpStage === 'request' ? (
+            <form
+              className="mt-6 space-y-4"
+              onSubmit={(event) => {
+                event.preventDefault();
+                requestOtp.mutate({ data: { email } });
+              }}
+            >
+              <label className="block">
+                <span className="mono text-[10px] uppercase tracking-[.14em] text-[#9a7564]">Email</span>
+                <input
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  className="mt-2 w-full border-b border-[#decdb9] bg-transparent py-2 text-sm text-[#67232d] outline-none"
+                  data-testid="input-admin-otp-email"
+                />
+              </label>
+              <p className="text-xs text-[#9a7564]">We'll send a 6-digit code to the admin WhatsApp number on file.</p>
+              <button
+                type="submit"
+                disabled={requestOtp.isPending}
+                className="w-full rounded-full bg-[#67232d] px-5 py-3 text-sm font-semibold uppercase tracking-[.12em] text-[#f9e7c5] disabled:opacity-60"
+                data-testid="button-request-otp"
+              >
+                {requestOtp.isPending ? 'Sending…' : 'Send code'}
+              </button>
+            </form>
+          ) : (
+            <form
+              className="mt-6 space-y-4"
+              onSubmit={(event) => {
+                event.preventDefault();
+                verifyOtp.mutate({ data: { email, code } });
+              }}
+            >
+              {otpNotice ? <p className="text-xs text-[#9a7564]">{otpNotice}</p> : null}
+              <label className="block">
+                <span className="mono text-[10px] uppercase tracking-[.14em] text-[#9a7564]">6-digit code</span>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]{6}"
+                  maxLength={6}
+                  required
+                  value={code}
+                  onChange={(event) => setCode(event.target.value.replace(/\D/g, ''))}
+                  className="mt-2 w-full border-b border-[#decdb9] bg-transparent py-2 text-center text-lg tracking-[.4em] text-[#67232d] outline-none"
+                  data-testid="input-otp-code"
+                />
+              </label>
+              {verifyOtp.isError ? <p className="text-xs text-[#b83a36]">{verifyOtp.error instanceof Error ? verifyOtp.error.message : 'Invalid or expired code.'}</p> : null}
+              <button
+                type="submit"
+                disabled={verifyOtp.isPending || code.length !== 6}
+                className="w-full rounded-full bg-[#67232d] px-5 py-3 text-sm font-semibold uppercase tracking-[.12em] text-[#f9e7c5] disabled:opacity-60"
+                data-testid="button-verify-otp"
+              >
+                {verifyOtp.isPending ? 'Verifying…' : 'Verify & sign in'}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setOtpStage('request'); setCode(''); }}
+                className="w-full text-center text-xs font-semibold uppercase tracking-[.1em] text-[#9a7564]"
+                data-testid="button-otp-back"
+              >
+                Use a different email / resend
+              </button>
+            </form>
+          )}
         </div>
       </div>
     </AdminShell>
@@ -219,7 +337,7 @@ function blankDraft(): ProductDraft {
     notes: '',
     badge: '',
     active: true,
-    variants: [{ weightGrams: 1000, price: 0, sku: '', stockQty: 0, isDefault: true }],
+    variants: [{ weightGrams: 500, price: 0, sku: '', stockQty: 0, isDefault: true }],
   };
 }
 
@@ -634,8 +752,14 @@ function OrderDetailModal({ order, onClose }: { order: OrderWithItems; onClose: 
             </div>
             <div className="rounded-xl border border-[#decdb9] bg-white p-4">
               <p className="mono text-[10px] uppercase tracking-[.14em] text-[#9a7564]">Delivery address</p>
-              <p className="mt-2 flex items-start gap-1.5 text-xs text-[#775e53]"><MapPin size={12} className="mt-0.5 shrink-0" /> {order.address}, {order.city} {order.pincode}</p>
+              <p className="mt-2 flex items-start gap-1.5 text-xs text-[#775e53]"><MapPin size={12} className="mt-0.5 shrink-0" /> {order.address}, {order.city}{order.state ? `, ${order.state}` : ''} {order.pincode}</p>
             </div>
+            {order.billingAddress ? (
+              <div className="rounded-xl border border-[#decdb9] bg-white p-4 sm:col-span-2">
+                <p className="mono text-[10px] uppercase tracking-[.14em] text-[#9a7564]">Billing address</p>
+                <p className="mt-2 flex items-start gap-1.5 text-xs text-[#775e53]"><MapPin size={12} className="mt-0.5 shrink-0" /> {order.billingAddress}, {order.billingCity}{order.billingState ? `, ${order.billingState}` : ''} {order.billingPincode}</p>
+              </div>
+            ) : null}
           </div>
 
           {order.notes ? (
@@ -730,6 +854,16 @@ function OrderDetailModal({ order, onClose }: { order: OrderWithItems; onClose: 
                   {shipOrder.isPending ? 'Creating shipment…' : 'Create shipment via Shiprocket'} <Send size={14} />
                 </button>
               ) : null}
+
+              <a
+                href={`/api/admin/orders/${order.id}/invoice`}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center gap-2 rounded-full border border-[#decdb9] px-5 py-2.5 text-xs font-semibold uppercase tracking-[.12em] text-[#67232d]"
+                data-testid="link-download-invoice"
+              >
+                Download invoice <ExternalLink size={14} />
+              </a>
             </div>
             {shipError ? <p className="mt-3 text-xs text-[#b83a36]" data-testid="text-ship-error">{shipError}</p> : null}
             {order.shippingMethod === 'india_post' ? (
@@ -742,14 +876,62 @@ function OrderDetailModal({ order, onClose }: { order: OrderWithItems; onClose: 
   );
 }
 
+function exportOrdersToExcel(orders: OrderWithItems[]) {
+  const rows = orders.map((order) => ({
+    'Order #': order.orderNumber,
+    Date: new Date(order.createdAt).toLocaleDateString('en-IN'),
+    Customer: order.customerName,
+    Phone: order.phone,
+    Email: order.email ?? '',
+    Address: order.address,
+    City: order.city,
+    State: order.state ?? '',
+    Pincode: order.pincode,
+    'Billing address': order.billingAddress ?? '',
+    'Billing city': order.billingCity ?? '',
+    'Billing state': order.billingState ?? '',
+    'Billing pincode': order.billingPincode ?? '',
+    Items: order.items.map((item) => `${item.quantity}x ${item.name}`).join(', '),
+    Subtotal: order.subtotal,
+    Shipping: order.shippingFee,
+    Total: order.total,
+    'Shipping method': order.shippingMethod === 'shiprocket' ? 'Shiprocket' : 'India Post',
+    'Payment method': order.paymentMethod,
+    'Payment status': order.paymentStatus,
+    Status: order.status,
+    'Tracking number': order.trackingNumber ?? '',
+  }));
+
+  const worksheet = XLSX.utils.json_to_sheet(rows);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'Orders');
+  const date = new Date().toISOString().slice(0, 10);
+  XLSX.writeFile(workbook, `gayathri-coffee-orders-${date}.xlsx`);
+}
+
 function OrdersTab() {
-  const { data: orders, isLoading } = useAdminListOrders();
+  // Shiprocket/Razorpay webhooks update orders server-side outside of any
+  // click here, so poll instead of relying solely on manual invalidation.
+  const { data: orders, isLoading } = useAdminListOrders({
+    query: { queryKey: getAdminListOrdersQueryKey(), refetchInterval: 15_000 },
+  });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selectedOrder = selectedId ? (orders?.find((o) => o.id === selectedId) ?? null) : null;
 
   return (
     <div className="mx-auto max-w-[1100px] px-5 py-10 sm:px-8">
-      <h2 className="serif text-2xl text-[#67232d]">Orders</h2>
+      <div className="flex items-center justify-between">
+        <h2 className="serif text-2xl text-[#67232d]">Orders</h2>
+        <button
+          type="button"
+          onClick={() => orders?.length && exportOrdersToExcel(orders)}
+          disabled={!orders?.length}
+          className="flex items-center gap-2 rounded-full border border-[#decdb9] px-4 py-2 text-xs font-semibold uppercase tracking-[.1em] text-[#67232d] disabled:opacity-60"
+          data-testid="button-export-orders-excel"
+        >
+          Export to Excel <ExternalLink size={14} />
+        </button>
+      </div>
       <div className="mt-6 space-y-3">
         {isLoading ? <p className="text-sm text-[#9a7564]">Loading…</p> : null}
         {orders?.length === 0 ? <p className="text-sm text-[#9a7564]">No orders yet.</p> : null}

@@ -65,6 +65,50 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+  /admin/login/request-otp:
+    post:
+      operationId: adminRequestOtp
+      tags: [admin]
+      summary: Request a WhatsApp sign-in code
+      description: Sends a one-time code to the admin's WhatsApp number if the email matches an account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OtpRequestInput"
+      responses:
+        "200":
+          description: Request processed (does not reveal whether the email matched, for account enumeration safety)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OtpSentResult"
+  /admin/login/verify-otp:
+    post:
+      operationId: adminVerifyOtp
+      tags: [admin]
+      summary: Verify a WhatsApp sign-in code
+      description: Verifies the one-time code and signs the admin in, same as password login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OtpVerifyInput"
+      responses:
+        "200":
+          description: Logged in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminMe"
+        "401":
+          description: Invalid, expired, or already-used code
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
   /admin/logout:
     post:
       operationId: adminLogout
@@ -573,6 +617,32 @@ components:
           format: email
       required:
         - email
+    OtpRequestInput:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+      required:
+        - email
+    OtpSentResult:
+      type: object
+      properties:
+        sent:
+          type: boolean
+      required:
+        - sent
+    OtpVerifyInput:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        code:
+          type: string
+      required:
+        - email
+        - code
     ProductVariant:
       type: object
       properties:
@@ -868,6 +938,23 @@ components:
           type: string
         pincode:
           type: string
+        state:
+          type: string
+          nullable: true
+          description: Shipping state — determines CGST+SGST vs IGST on the invoice
+        billingAddress:
+          type: string
+          nullable: true
+          description: Only set when billing address differs from the shipping address above
+        billingCity:
+          type: string
+          nullable: true
+        billingPincode:
+          type: string
+          nullable: true
+        billingState:
+          type: string
+          nullable: true
         notes:
           type: string
           nullable: true
@@ -944,6 +1031,21 @@ components:
           type: string
         pincode:
           type: string
+        state:
+          type: string
+          nullable: true
+        billingAddress:
+          type: string
+          nullable: true
+        billingCity:
+          type: string
+          nullable: true
+        billingPincode:
+          type: string
+          nullable: true
+        billingState:
+          type: string
+          nullable: true
         notes:
           type: string
           nullable: true

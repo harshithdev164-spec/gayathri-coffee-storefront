@@ -34,6 +34,9 @@ import type {
   OrderInput,
   OrderUpdateInput,
   OrderWithItems,
+  OtpRequestInput,
+  OtpSentResult,
+  OtpVerifyInput,
   PackingRecipient,
   PackingRecipientDeleteResult,
   PackingRecipientInput,
@@ -242,6 +245,184 @@ export const useAdminLogin = <TError = ErrorType<ApiError>,
         TContext
       > => {
       return useMutation(getAdminLoginMutationOptions(options));
+    }
+
+export const getAdminRequestOtpUrl = () => {
+
+
+
+
+  return `/api/admin/login/request-otp`
+}
+
+/**
+ * Sends a one-time code to the admin's WhatsApp number if the email matches an account
+ * @summary Request a WhatsApp sign-in code
+ */
+export const adminRequestOtp = async (otpRequestInput: OtpRequestInput, options?: Parameters<typeof customFetch>[1]): Promise<OtpSentResult> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<OtpSentResult>(getAdminRequestOtpUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(otpRequestInput)
+  }
+);}
+
+
+
+
+
+export const getAdminRequestOtpMutationKey = () => ['adminRequestOtp'] as const;
+
+export const getAdminRequestOtpMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof adminRequestOtp>>, TError,AdminRequestOtpMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof adminRequestOtp>>, TError,AdminRequestOtpMutationVariables, TContext> => {
+
+const mutationKey = getAdminRequestOtpMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof adminRequestOtp>>, AdminRequestOtpMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  adminRequestOtp(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AdminRequestOtpMutationResult = NonNullable<Awaited<ReturnType<typeof adminRequestOtp>>>
+    export type AdminRequestOtpMutationBody = BodyType<OtpRequestInput>
+    export type AdminRequestOtpMutationError = ErrorType<unknown>
+    export type AdminRequestOtpMutationVariables = {data: BodyType<OtpRequestInput>}
+
+    /**
+ * @summary Request a WhatsApp sign-in code
+ */
+export const useAdminRequestOtp = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof adminRequestOtp>>, TError,AdminRequestOtpMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof adminRequestOtp>>,
+        TError,
+        AdminRequestOtpMutationVariables,
+        TContext
+      > => {
+      return useMutation(getAdminRequestOtpMutationOptions(options));
+    }
+
+export const getAdminVerifyOtpUrl = () => {
+
+
+
+
+  return `/api/admin/login/verify-otp`
+}
+
+/**
+ * Verifies the one-time code and signs the admin in, same as password login
+ * @summary Verify a WhatsApp sign-in code
+ */
+export const adminVerifyOtp = async (otpVerifyInput: OtpVerifyInput, options?: Parameters<typeof customFetch>[1]): Promise<AdminMe> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<AdminMe>(getAdminVerifyOtpUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(otpVerifyInput)
+  }
+);}
+
+
+
+
+
+export const getAdminVerifyOtpMutationKey = () => ['adminVerifyOtp'] as const;
+
+export const getAdminVerifyOtpMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof adminVerifyOtp>>, TError,AdminVerifyOtpMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof adminVerifyOtp>>, TError,AdminVerifyOtpMutationVariables, TContext> => {
+
+const mutationKey = getAdminVerifyOtpMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof adminVerifyOtp>>, AdminVerifyOtpMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  adminVerifyOtp(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AdminVerifyOtpMutationResult = NonNullable<Awaited<ReturnType<typeof adminVerifyOtp>>>
+    export type AdminVerifyOtpMutationBody = BodyType<OtpVerifyInput>
+    export type AdminVerifyOtpMutationError = ErrorType<ApiError>
+    export type AdminVerifyOtpMutationVariables = {data: BodyType<OtpVerifyInput>}
+
+    /**
+ * @summary Verify a WhatsApp sign-in code
+ */
+export const useAdminVerifyOtp = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof adminVerifyOtp>>, TError,AdminVerifyOtpMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof adminVerifyOtp>>,
+        TError,
+        AdminVerifyOtpMutationVariables,
+        TContext
+      > => {
+      return useMutation(getAdminVerifyOtpMutationOptions(options));
     }
 
 export const getAdminLogoutUrl = () => {

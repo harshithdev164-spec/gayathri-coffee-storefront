@@ -15,6 +15,13 @@ export interface OrderInput {
   address: string;
   city: string;
   pincode: string;
+  /** Shipping state — determines CGST+SGST vs IGST on the invoice */
+  state?: string | null;
+  /** Only set when billing address differs from the shipping address above */
+  billingAddress?: string | null;
+  billingCity?: string | null;
+  billingPincode?: string | null;
+  billingState?: string | null;
   notes?: string | null;
   subtotal: number;
   shippingMethod: OrderInputShippingMethod;

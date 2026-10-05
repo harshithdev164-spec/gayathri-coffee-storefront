@@ -76,6 +76,14 @@ export type ShiprocketOrderInput = {
   address: string;
   city: string;
   pincode: string;
+  state?: string | null;
+  // Only set when the customer entered a billing address different from the
+  // shipping address above — Shiprocket delivers to address/city/pincode and
+  // prints billing_* on the invoice it generates.
+  billingAddress?: string | null;
+  billingCity?: string | null;
+  billingPincode?: string | null;
+  billingState?: string | null;
   items: { name: string; price: number; quantity: number; sku: string }[];
   total: number;
   cod: boolean;
@@ -90,6 +98,8 @@ export type ShiprocketShipmentResult = {
 export async function createShiprocketShipment(order: ShiprocketOrderInput): Promise<ShiprocketShipmentResult> {
   const token = await getShiprocketToken();
   const [firstName, ...rest] = order.customerName.trim().split(/\s+/);
+  const lastName = rest.join(" ") || ".";
+  const hasSeparateBilling = Boolean(order.billingAddress);
 
   const res = await fetch(`${SHIPROCKET_BASE}/orders/create/adhoc`, {
     method: "POST",
@@ -99,14 +109,26 @@ export async function createShiprocketShipment(order: ShiprocketOrderInput): Pro
       order_date: new Date().toISOString().slice(0, 10),
       pickup_location: "Primary",
       billing_customer_name: firstName || order.customerName,
-      billing_last_name: rest.join(" ") || ".",
-      billing_address: order.address,
-      billing_city: order.city,
-      billing_pincode: order.pincode,
-      billing_state: "Karnataka",
+      billing_last_name: lastName,
+      billing_address: hasSeparateBilling ? order.billingAddress : order.address,
+      billing_city: hasSeparateBilling ? (order.billingCity ?? order.city) : order.city,
+      billing_pincode: hasSeparateBilling ? (order.billingPincode ?? order.pincode) : order.pincode,
+      billing_state: (hasSeparateBilling ? order.billingState : order.state) ?? "Karnataka",
       billing_country: "India",
       billing_phone: order.phone,
-      shipping_is_billing: true,
+      shipping_is_billing: !hasSeparateBilling,
+      ...(hasSeparateBilling
+        ? {
+            shipping_customer_name: firstName || order.customerName,
+            shipping_last_name: lastName,
+            shipping_address: order.address,
+            shipping_city: order.city,
+            shipping_pincode: order.pincode,
+            shipping_state: order.state ?? "Karnataka",
+            shipping_country: "India",
+            shipping_phone: order.phone,
+          }
+        : {}),
       order_items: order.items.map((item) => ({
         name: item.name,
         units: item.quantity,

@@ -125,11 +125,20 @@ const categoryShots: CategoryShot[] = [
   { label: 'Tea', filter: 'Tea', tagline: 'Estate-grown leaves', image: categoryPhotoTea },
 ];
 
+// Keep these names exact — the backend matches them to decide CGST+SGST vs IGST on the invoice.
+const INDIAN_STATES = [
+  'Andaman and Nicobar Islands', 'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chandigarh',
+  'Chhattisgarh', 'Dadra and Nagar Haveli', 'Daman and Diu', 'Delhi', 'Goa', 'Gujarat', 'Haryana',
+  'Himachal Pradesh', 'Jammu and Kashmir', 'Jharkhand', 'Karnataka', 'Kerala', 'Ladakh', 'Lakshadweep',
+  'Madhya Pradesh', 'Maharashtra', 'Manipur', 'Meghalaya', 'Mizoram', 'Nagaland', 'Odisha', 'Puducherry',
+  'Punjab', 'Rajasthan', 'Sikkim', 'Tamil Nadu', 'Telangana', 'Tripura', 'Uttar Pradesh', 'Uttarakhand',
+  'West Bengal',
+];
+
 type PackWeight = { label: string; grams: number; factor: number };
 const packWeights: PackWeight[] = [
   { label: '250 g', grams: 250, factor: 0.3 },
   { label: '500 g', grams: 500, factor: 0.55 },
-  { label: '1 kg', grams: 1000, factor: 1 },
 ];
 
 type ProductGrind = 'Coarse (Filter)' | 'Fine';
@@ -461,7 +470,7 @@ function Storefront({ onSwitchBrand }: { onSwitchBrand: (originX: string, origin
   const [flyingBeans, setFlyingBeans] = useState<FlyingBean[]>([]);
   const [beanCartIcon, setBeanCartIcon] = useState(false);
   const [addSheetProduct, setAddSheetProduct] = useState<Product | null>(null);
-  const [sheetWeight, setSheetWeight] = useState<PackWeight>(packWeights[2]);
+  const [sheetWeight, setSheetWeight] = useState<PackWeight>(packWeights[1]);
   const [sheetGrind, setSheetGrind] = useState<ProductGrind>('Coarse (Filter)');
   const cartButtonRef = useRef<HTMLButtonElement>(null);
   const beanIdRef = useRef(0);
@@ -482,13 +491,13 @@ function Storefront({ onSwitchBrand }: { onSwitchBrand: (originX: string, origin
 
   const openAddSheet = (product: Product) => {
     setAddSheetProduct(product);
-    setSheetWeight(packWeights[2]);
+    setSheetWeight(packWeights[1]);
     setSheetGrind('Coarse (Filter)');
   };
 
   const openQuickView = (product: Product) => {
     setQuickView(product);
-    setSheetWeight(packWeights[2]);
+    setSheetWeight(packWeights[1]);
     setSheetGrind('Coarse (Filter)');
   };
 
@@ -1695,7 +1704,13 @@ function CheckoutPage() {
   const [email, setEmail] = useState('');
   const [address, setAddress] = useState('');
   const [city, setCity] = useState('');
+  const [state, setState] = useState('');
   const [pincode, setPincode] = useState('');
+  const [billingSameAsShipping, setBillingSameAsShipping] = useState(true);
+  const [billingAddress, setBillingAddress] = useState('');
+  const [billingCity, setBillingCity] = useState('');
+  const [billingState, setBillingState] = useState('');
+  const [billingPincode, setBillingPincode] = useState('');
   const [notes, setNotes] = useState('');
   const [shippingMethod, setShippingMethod] = useState<ShippingMethod>('shiprocket');
   // No COD — every order pays online through Razorpay.
@@ -1754,7 +1769,12 @@ function CheckoutPage() {
     email: email.trim() || null,
     address: address.trim(),
     city: city.trim(),
+    state: state || null,
     pincode: pincode.trim(),
+    billingAddress: billingSameAsShipping ? null : billingAddress.trim(),
+    billingCity: billingSameAsShipping ? null : billingCity.trim(),
+    billingState: billingSameAsShipping ? null : billingState || null,
+    billingPincode: billingSameAsShipping ? null : billingPincode.trim(),
     notes: notes.trim() || null,
     subtotal,
     shippingMethod,
@@ -1777,7 +1797,14 @@ function CheckoutPage() {
     if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) missing.push('a valid email address');
     if (!address.trim()) missing.push('delivery address');
     if (!city.trim()) missing.push('city');
+    if (!state) missing.push('state');
     if (!pincode.trim() || pincode.trim().length < 6) missing.push('a valid pincode');
+    if (!billingSameAsShipping) {
+      if (!billingAddress.trim()) missing.push('billing address');
+      if (!billingCity.trim()) missing.push('billing city');
+      if (!billingState) missing.push('billing state');
+      if (!billingPincode.trim() || billingPincode.trim().length < 6) missing.push('a valid billing pincode');
+    }
     if (missing.length > 0) {
       setErrors(missing);
       return;
@@ -1896,10 +1923,50 @@ function CheckoutPage() {
                   <span className="mono text-[10px] uppercase tracking-[.14em] text-[#9a7564]">Address</span>
                   <textarea value={address} onChange={(event) => setAddress(event.target.value)} placeholder="House no, street, landmark" className="mt-2 min-h-[76px] w-full border border-[#decdb9] bg-transparent p-3 text-sm text-[#67232d] outline-none placeholder:text-[#c3ab93]" data-testid="input-checkout-address" />
                 </label>
-                <label className="block sm:col-span-2">
+                <label className="block">
                   <span className="mono text-[10px] uppercase tracking-[.14em] text-[#9a7564]">City</span>
                   <input type="text" value={city} onChange={(event) => setCity(event.target.value)} placeholder="Mysore" className="mt-2 w-full border-b border-[#decdb9] bg-transparent py-2 text-sm text-[#67232d] outline-none placeholder:text-[#c3ab93]" data-testid="input-checkout-city" />
                 </label>
+                <label className="block">
+                  <span className="mono text-[10px] uppercase tracking-[.14em] text-[#9a7564]">State</span>
+                  <select value={state} onChange={(event) => setState(event.target.value)} className="mt-2 w-full border-b border-[#decdb9] bg-transparent py-2 text-sm text-[#67232d] outline-none" data-testid="select-checkout-state">
+                    <option value="">Select state</option>
+                    {INDIAN_STATES.map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </label>
+                <label className="flex items-center gap-2 sm:col-span-2">
+                  <input
+                    type="checkbox"
+                    checked={billingSameAsShipping}
+                    onChange={(event) => setBillingSameAsShipping(event.target.checked)}
+                    className="size-4 accent-[#67232d]"
+                    data-testid="checkbox-billing-same-as-shipping"
+                  />
+                  <span className="text-sm text-[#67232d]">Billing address same as shipping address</span>
+                </label>
+                {!billingSameAsShipping ? (
+                  <>
+                    <label className="block sm:col-span-2">
+                      <span className="mono text-[10px] uppercase tracking-[.14em] text-[#9a7564]">Billing address</span>
+                      <textarea value={billingAddress} onChange={(event) => setBillingAddress(event.target.value)} placeholder="House no, street, landmark" className="mt-2 min-h-[76px] w-full border border-[#decdb9] bg-transparent p-3 text-sm text-[#67232d] outline-none placeholder:text-[#c3ab93]" data-testid="input-checkout-billing-address" />
+                    </label>
+                    <label className="block">
+                      <span className="mono text-[10px] uppercase tracking-[.14em] text-[#9a7564]">Billing city</span>
+                      <input type="text" value={billingCity} onChange={(event) => setBillingCity(event.target.value)} placeholder="Mysore" className="mt-2 w-full border-b border-[#decdb9] bg-transparent py-2 text-sm text-[#67232d] outline-none placeholder:text-[#c3ab93]" data-testid="input-checkout-billing-city" />
+                    </label>
+                    <label className="block">
+                      <span className="mono text-[10px] uppercase tracking-[.14em] text-[#9a7564]">Billing pincode</span>
+                      <input type="text" value={billingPincode} onChange={(event) => setBillingPincode(event.target.value)} placeholder="560001" className="mt-2 w-full border-b border-[#decdb9] bg-transparent py-2 text-sm text-[#67232d] outline-none placeholder:text-[#c3ab93]" data-testid="input-checkout-billing-pincode" />
+                    </label>
+                    <label className="block">
+                      <span className="mono text-[10px] uppercase tracking-[.14em] text-[#9a7564]">Billing state</span>
+                      <select value={billingState} onChange={(event) => setBillingState(event.target.value)} className="mt-2 w-full border-b border-[#decdb9] bg-transparent py-2 text-sm text-[#67232d] outline-none" data-testid="select-checkout-billing-state">
+                        <option value="">Select state</option>
+                        {INDIAN_STATES.map((s) => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    </label>
+                  </>
+                ) : null}
                 <label className="block sm:col-span-2">
                   <span className="mono text-[10px] uppercase tracking-[.14em] text-[#9a7564]">Delivery notes (optional)</span>
                   <input type="text" value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Leave with security, call on arrival..." className="mt-2 w-full border-b border-[#decdb9] bg-transparent py-2 text-sm text-[#67232d] outline-none placeholder:text-[#c3ab93]" data-testid="input-checkout-notes" />

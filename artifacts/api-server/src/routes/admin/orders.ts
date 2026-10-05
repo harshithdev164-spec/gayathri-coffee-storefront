@@ -5,8 +5,8 @@ import { AdminListOrdersResponse, AdminUpdateOrderBody, AdminUpdateOrderResponse
 import { requireAdmin } from "../../middlewares/require-admin";
 import { shapeOrder } from "../../lib/order-shape";
 import { createShiprocketShipment, isShiprocketConfigured } from "../../lib/shiprocket";
-import { sendShippingUpdateEmail } from "../../lib/email";
-import { sendOrderShippedWhatsApp, sendAdminOrderShippedAlert, sendAdminOrderCancelledAlert } from "../../lib/whatsapp";
+import { generateInvoicePdf } from "../../lib/invoice";
+import { updateOrderStatus } from "../../lib/order-transitions";
 
 const router: IRouter = Router();
 router.use(requireAdmin);
@@ -34,28 +34,25 @@ router.patch("/orders/:id", async (req, res) => {
     return;
   }
 
-  const [order] = await db
-    .update(ordersTable)
-    .set(parsed.data)
-    .where(eq(ordersTable.id, id))
-    .returning();
+  const order = await updateOrderStatus(existing, parsed.data);
+
+  const items = await db.select().from(orderItemsTable).where(eq(orderItemsTable.orderId, order.id));
+  res.json(AdminUpdateOrderResponse.parse(shapeOrder(order, items)));
+});
+
+router.get("/orders/:id/invoice", async (req, res) => {
+  const { id } = req.params;
+  const [order] = await db.select().from(ordersTable).where(eq(ordersTable.id, id)).limit(1);
   if (!order) {
     res.status(404).json({ error: "Order not found" });
     return;
   }
+  const items = await db.select().from(orderItemsTable).where(eq(orderItemsTable.orderId, id));
 
-  if (order.status === "shipped" && existing.status !== "shipped") {
-    void sendShippingUpdateEmail(order);
-    void sendOrderShippedWhatsApp(order);
-    void sendAdminOrderShippedAlert(order);
-  }
-
-  if (order.status === "cancelled" && existing.status !== "cancelled") {
-    void sendAdminOrderCancelledAlert(order);
-  }
-
-  const items = await db.select().from(orderItemsTable).where(eq(orderItemsTable.orderId, order.id));
-  res.json(AdminUpdateOrderResponse.parse(shapeOrder(order, items)));
+  const pdfBytes = await generateInvoicePdf(order, items);
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `attachment; filename="invoice-${order.orderNumber}.pdf"`);
+  res.send(Buffer.from(pdfBytes));
 });
 
 router.post("/orders/:id/ship", async (req, res) => {
@@ -85,6 +82,11 @@ router.post("/orders/:id/ship", async (req, res) => {
       address: order.address,
       city: order.city,
       pincode: order.pincode,
+      state: order.state,
+      billingAddress: order.billingAddress,
+      billingCity: order.billingCity,
+      billingPincode: order.billingPincode,
+      billingState: order.billingState,
       items: items.map((item) => ({
         name: item.nameSnapshot,
         price: item.priceSnapshot,

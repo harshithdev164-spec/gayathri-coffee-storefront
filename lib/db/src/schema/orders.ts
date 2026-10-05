@@ -12,6 +12,13 @@ export const ordersTable = pgTable("orders", {
   address: text("address").notNull(),
   city: text("city").notNull(),
   pincode: text("pincode").notNull(),
+  // Used to decide CGST+SGST (intra-Karnataka) vs IGST (inter-state) on the invoice.
+  state: text("state"),
+  // Billing address — null when it's the same as the shipping address above.
+  billingAddress: text("billing_address"),
+  billingCity: text("billing_city"),
+  billingPincode: text("billing_pincode"),
+  billingState: text("billing_state"),
   notes: text("notes"),
   subtotal: integer("subtotal").notNull(),
   shippingMethod: text("shipping_method").notNull(),

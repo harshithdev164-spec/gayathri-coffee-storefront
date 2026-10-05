@@ -16,6 +16,11 @@ export interface OrderWithItems {
   address: string;
   city: string;
   pincode: string;
+  state?: string | null;
+  billingAddress?: string | null;
+  billingCity?: string | null;
+  billingPincode?: string | null;
+  billingState?: string | null;
   notes?: string | null;
   subtotal: number;
   shippingMethod: string;

@@ -32,6 +32,33 @@ export const AdminLoginResponse = zod.object({
 
 
 /**
+ * Sends a one-time code to the admin's WhatsApp number if the email matches an account
+ * @summary Request a WhatsApp sign-in code
+ */
+export const AdminRequestOtpBody = zod.object({
+  "email": zod.string().email()
+})
+
+export const AdminRequestOtpResponse = zod.object({
+  "sent": zod.boolean()
+})
+
+
+/**
+ * Verifies the one-time code and signs the admin in, same as password login
+ * @summary Verify a WhatsApp sign-in code
+ */
+export const AdminVerifyOtpBody = zod.object({
+  "email": zod.string().email(),
+  "code": zod.string()
+})
+
+export const AdminVerifyOtpResponse = zod.object({
+  "email": zod.string().email()
+})
+
+
+/**
  * Clears the admin session cookie
  * @summary Admin logout
  */
@@ -464,6 +491,11 @@ export const CreateOrderBody = zod.object({
   "address": zod.string(),
   "city": zod.string(),
   "pincode": zod.string(),
+  "state": zod.string().nullish().describe('Shipping state — determines CGST+SGST vs IGST on the invoice'),
+  "billingAddress": zod.string().nullish().describe('Only set when billing address differs from the shipping address above'),
+  "billingCity": zod.string().nullish(),
+  "billingPincode": zod.string().nullish(),
+  "billingState": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "subtotal": zod.number().int(),
   "shippingMethod": zod.enum(['shiprocket', 'india_post']),
@@ -490,6 +522,11 @@ export const CreateOrderResponse = zod.object({
   "address": zod.string(),
   "city": zod.string(),
   "pincode": zod.string(),
+  "state": zod.string().nullish(),
+  "billingAddress": zod.string().nullish(),
+  "billingCity": zod.string().nullish(),
+  "billingPincode": zod.string().nullish(),
+  "billingState": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "subtotal": zod.number().int(),
   "shippingMethod": zod.string(),
@@ -523,6 +560,11 @@ export const AdminListOrdersResponseItem = zod.object({
   "address": zod.string(),
   "city": zod.string(),
   "pincode": zod.string(),
+  "state": zod.string().nullish(),
+  "billingAddress": zod.string().nullish(),
+  "billingCity": zod.string().nullish(),
+  "billingPincode": zod.string().nullish(),
+  "billingState": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "subtotal": zod.number().int(),
   "shippingMethod": zod.string(),
@@ -562,6 +604,11 @@ export const AdminShipOrderResponse = zod.object({
   "address": zod.string(),
   "city": zod.string(),
   "pincode": zod.string(),
+  "state": zod.string().nullish(),
+  "billingAddress": zod.string().nullish(),
+  "billingCity": zod.string().nullish(),
+  "billingPincode": zod.string().nullish(),
+  "billingState": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "subtotal": zod.number().int(),
   "shippingMethod": zod.string(),
@@ -605,6 +652,11 @@ export const AdminUpdateOrderResponse = zod.object({
   "address": zod.string(),
   "city": zod.string(),
   "pincode": zod.string(),
+  "state": zod.string().nullish(),
+  "billingAddress": zod.string().nullish(),
+  "billingCity": zod.string().nullish(),
+  "billingPincode": zod.string().nullish(),
+  "billingState": zod.string().nullish(),
   "notes": zod.string().nullish(),
   "subtotal": zod.number().int(),
   "shippingMethod": zod.string(),
