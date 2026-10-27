@@ -11,6 +11,8 @@ import paymentRouter from "./payment";
 import adminStatsRouter from "./admin/stats";
 import adminPackingRecipientsRouter from "./admin/packing-recipients";
 import webhooksRouter from "./webhooks";
+import adminWhatsappRouter from "./admin/whatsapp";
+import cronRouter from "./cron";
 
 const router: IRouter = Router();
 
@@ -21,6 +23,7 @@ router.use(settingsRouter);
 router.use(ordersRouter);
 router.use(paymentRouter);
 router.use(webhooksRouter);
+router.use(cronRouter);
 
 // These routers gate themselves with `requireAdmin` — mounting them under an
 // explicit /admin prefix (instead of bare `.use(...)`) ensures that gate only
@@ -31,5 +34,6 @@ router.use("/admin", adminSettingsRouter);
 router.use("/admin", adminOrdersRouter);
 router.use("/admin", adminStatsRouter);
 router.use("/admin", adminPackingRecipientsRouter);
+router.use("/admin", adminWhatsappRouter);
 
 export default router;

@@ -100,41 +100,47 @@ export async function createShiprocketShipment(order: ShiprocketOrderInput): Pro
   const [firstName, ...rest] = order.customerName.trim().split(/\s+/);
   const lastName = rest.join(" ") || ".";
   const hasSeparateBilling = Boolean(order.billingAddress);
+  // Shiprocket wants a bare 10-digit mobile number — strip +91 / spaces / dashes.
+  const phone = order.phone.replace(/\D/g, "").slice(-10);
+  // Address lines must be at least 3 characters; very long item names are rejected.
+  const padAddress = (value: string) => (value.trim().length >= 3 ? value.trim() : `${value.trim()} ...`.trim());
+  const itemName = (name: string) => name.slice(0, 200);
+  const skuOf = (sku: string) => sku.slice(0, 50);
 
   const res = await fetch(`${SHIPROCKET_BASE}/orders/create/adhoc`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
     body: JSON.stringify({
       order_id: order.orderNumber,
-      order_date: new Date().toISOString().slice(0, 10),
+      order_date: new Date().toISOString().slice(0, 16).replace("T", " "),
       pickup_location: "Primary",
       billing_customer_name: firstName || order.customerName,
       billing_last_name: lastName,
-      billing_address: hasSeparateBilling ? order.billingAddress : order.address,
+      billing_address: padAddress((hasSeparateBilling ? order.billingAddress : order.address) ?? ""),
       billing_city: hasSeparateBilling ? (order.billingCity ?? order.city) : order.city,
       billing_pincode: hasSeparateBilling ? (order.billingPincode ?? order.pincode) : order.pincode,
       billing_state: (hasSeparateBilling ? order.billingState : order.state) ?? "Karnataka",
       billing_country: "India",
-      billing_phone: order.phone,
+      billing_phone: phone,
       shipping_is_billing: !hasSeparateBilling,
       ...(hasSeparateBilling
         ? {
             shipping_customer_name: firstName || order.customerName,
             shipping_last_name: lastName,
-            shipping_address: order.address,
+            shipping_address: padAddress(order.address),
             shipping_city: order.city,
             shipping_pincode: order.pincode,
             shipping_state: order.state ?? "Karnataka",
             shipping_country: "India",
-            shipping_phone: order.phone,
+            shipping_phone: phone,
           }
         : {}),
       order_items: order.items.map((item) => ({
-        name: item.name,
+        name: itemName(item.name),
         units: item.quantity,
         selling_price: item.price,
         // Shiprocket requires an SKU per line item.
-        sku: item.sku,
+        sku: skuOf(item.sku) || "item",
       })),
       payment_method: order.cod ? "COD" : "Prepaid",
       sub_total: order.total,
@@ -145,19 +151,87 @@ export async function createShiprocketShipment(order: ShiprocketOrderInput): Pro
     }),
   });
 
-  const data = (await res.json()) as {
+  const data = (await res.json().catch(() => ({}))) as {
     message?: string;
+    errors?: Record<string, string[] | string>;
     order_id?: number | string;
     shipment_id?: number | string;
     awb_code?: string;
   };
-  if (!res.ok) {
-    throw new Error(data.message || `Shiprocket order creation failed (HTTP ${res.status})`);
+  if (!res.ok || (!data.order_id && !data.shipment_id)) {
+    // Validation failures come back as a generic message with the real reasons in `errors`.
+    const details = data.errors
+      ? Object.entries(data.errors).map(([field, msg]) => `${field}: ${Array.isArray(msg) ? msg.join(", ") : msg}`).join("; ")
+      : "";
+    throw new Error([data.message || `Shiprocket order creation failed (HTTP ${res.status})`, details].filter(Boolean).join(" — "));
   }
 
   return {
     shiprocketOrderId: data.order_id ? String(data.order_id) : "",
     shipmentId: data.shipment_id ? String(data.shipment_id) : "",
     awbCode: data.awb_code ? String(data.awb_code) : null,
+  };
+}
+
+async function shiprocketPost<T>(path: string, body: unknown, failure: string): Promise<T> {
+  const token = await getShiprocketToken();
+  const res = await fetch(`${SHIPROCKET_BASE}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(body),
+  });
+  const data = (await res.json().catch(() => ({}))) as T & { message?: string };
+  if (!res.ok) {
+    throw new Error(data.message || `${failure} (HTTP ${res.status})`);
+  }
+  return data;
+}
+
+export type AwbAssignment = { awbCode: string; courierName: string | null };
+
+// Picks Shiprocket's recommended courier for the shipment and generates its AWB.
+// This is the step that actually books the shipment (and debits freight from the wallet).
+export async function assignShiprocketAwb(shipmentId: string): Promise<AwbAssignment> {
+  const data = await shiprocketPost<{
+    awb_assign_status?: number;
+    message?: string;
+    response?: { data?: { awb_code?: string; courier_name?: string }; message?: string };
+  }>("/courier/assign/awb", { shipment_id: shipmentId }, "Shiprocket AWB assignment failed");
+
+  const awb = data.response?.data?.awb_code;
+  if (!awb) {
+    throw new Error(data.response?.message || data.message || "Shiprocket could not assign an AWB. Check your Shiprocket wallet balance and the order's weight/address.");
+  }
+  return { awbCode: String(awb), courierName: data.response?.data?.courier_name ?? null };
+}
+
+// Label URLs expire, so a fresh one is generated every time an admin downloads.
+export async function getShiprocketLabelUrl(shipmentId: string): Promise<string> {
+  const data = await shiprocketPost<{ label_url?: string; label_created?: number; response?: string; message?: string }>(
+    "/courier/generate/label",
+    { shipment_id: [Number(shipmentId)] },
+    "Shiprocket label generation failed",
+  );
+  if (!data.label_url) {
+    throw new Error(data.response || data.message || "Shiprocket did not return a label. The AWB may not be assigned yet.");
+  }
+  return data.label_url;
+}
+
+export type PickupResult = { scheduledFor: string | null; message: string };
+
+export async function scheduleShiprocketPickup(shipmentId: string): Promise<PickupResult> {
+  const data = await shiprocketPost<{
+    pickup_status?: number;
+    message?: string;
+    response?: { pickup_scheduled_date?: string; data?: string; message?: string };
+  }>("/courier/generate/pickup", { shipment_id: [Number(shipmentId)] }, "Shiprocket pickup scheduling failed");
+
+  if (data.pickup_status === 0 && !data.response?.pickup_scheduled_date) {
+    throw new Error(data.response?.message || data.message || "Shiprocket could not schedule the pickup.");
+  }
+  return {
+    scheduledFor: data.response?.pickup_scheduled_date ?? null,
+    message: data.response?.data ?? "Pickup requested.",
   };
 }

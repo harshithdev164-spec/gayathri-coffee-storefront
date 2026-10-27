@@ -26,6 +26,7 @@ export interface OrderInput {
   subtotal: number;
   shippingMethod: OrderInputShippingMethod;
   shippingFee: number;
+  packagingFee?: number;
   total: number;
   paymentMethod: string;
   /** Present when paid via Razorpay; verified server-side before the order is created */

@@ -13,10 +13,10 @@ import {
   Coffee,
   Heart,
   Instagram,
-  Mail,
   MapPin,
   Menu,
   Minus,
+  MessageCircle,
   Phone,
   Plus,
   ShoppingBag,
@@ -27,8 +27,9 @@ import {
 } from 'lucide-react';
 import logoPath from '@assets/Gayathri_Coffee_Logo_1789394897707.png';
 import heroPath from '@assets/hero-poster.png';
+import CircularCarousel from './components/CircularCarousel';
 import lottie from 'lottie-web';
-import { useListProducts, useGetShippingSettings, useGetIndiaPostRate, getGetIndiaPostRateQueryKey, useGetShiprocketRate, getGetShiprocketRateQueryKey, useCreateOrder, useGetPaymentSettings, useCreateRazorpayOrder, type ProductWithDetails } from '@workspace/api-client-react';
+import { useListProducts, useGetShippingSettings, useGetIndiaPostRate, getGetIndiaPostRateQueryKey, useCreateOrder, useGetPaymentSettings, useCreateRazorpayOrder, type ProductWithDetails } from '@workspace/api-client-react';
 import { AdminLoginPage, AdminPage } from './Admin';
 
 const leafIcons = Array.from({ length: 8 }, (_, i) => `/icons/leaf-${String(i + 1).padStart(2, '0')}.svg`);
@@ -55,7 +56,17 @@ type Product = {
   notes: string;
   image: string;
   badge?: string;
+  /** Every size this product is sold in, with its own price (smallest first). */
+  sizes?: SizeOption[];
 };
+
+type SizeOption = { label: string; grams: number; price: number; isDefault: boolean };
+
+// Decoction is sold by volume (ml); everything else by weight.
+function sizeLabel(category: string, grams: number): string {
+  if (category === 'Decoction') return `${grams} ml`;
+  return grams >= 1000 ? `${grams / 1000} kg` : `${grams} g`;
+}
 
 type CartItem = { product: Product; quantity: number };
 
@@ -86,8 +97,16 @@ function mapApiProduct(apiProduct: ProductWithDetails): Product {
     category: apiProduct.category as Product['category'],
     roast: apiProduct.roast,
     notes: apiProduct.notes,
-    image: primaryImage?.url ?? coffeeMockup,
+    image: primaryImage?.url ?? '',
     badge: apiProduct.badge ?? undefined,
+    sizes: [...apiProduct.variants]
+      .sort((a, b) => a.weightGrams - b.weightGrams)
+      .map((variant) => ({
+        label: sizeLabel(apiProduct.category, variant.weightGrams),
+        grams: variant.weightGrams,
+        price: variant.price,
+        isDefault: variant.isDefault,
+      })),
   };
 }
 
@@ -135,14 +154,28 @@ const INDIAN_STATES = [
   'West Bengal',
 ];
 
-type PackWeight = { label: string; grams: number; factor: number };
-const packWeights: PackWeight[] = [
-  { label: '250 g', grams: 250, factor: 0.3 },
-  { label: '500 g', grams: 500, factor: 0.55 },
-];
+// Products without a photo show their name on a plain tile — never a stock pack image that looks like another product.
+function ProductImage({ product, imgClassName, tileClassName, small = false }: { product: Product; imgClassName: string; tileClassName: string; small?: boolean }) {
+  if (product.image) return <img src={product.image} alt={`${product.name} pack`} className={imgClassName} />;
+  return (
+    <div className={`grid place-items-center overflow-hidden rounded-xl border border-dashed border-[#decdb9] bg-[#fdf8f1] text-center ${tileClassName}`} role="img" aria-label={product.name} data-testid="product-image-placeholder">
+      <span className={`product-name px-2 leading-tight text-[#67232d] ${small ? 'text-[9px]' : 'text-xl sm:text-2xl'}`}>{product.name}</span>
+    </div>
+  );
+}
 
-type ProductGrind = 'Coarse (Filter)' | 'Fine';
-const productGrindOptions: ProductGrind[] = ['Coarse (Filter)', 'Fine'];
+// Cheapest size a customer can actually buy (what the product card advertises as "From").
+function startingPrice(product: Product): number {
+  return product.sizes?.length ? Math.min(...product.sizes.map((size) => size.price)) : product.price;
+}
+
+type ProductGrind = 'Coarse (Filter)' | 'Fine (Nice)' | 'Roasted Beans';
+
+// Pure Coffee can also be bought as whole roasted beans; every other product is ground.
+function grindOptionsFor(product: Product): ProductGrind[] {
+  return product.category === 'Pure Coffee' ? ['Coarse (Filter)', 'Fine (Nice)', 'Roasted Beans'] : ['Coarse (Filter)', 'Fine (Nice)'];
+}
+const grindTestId = (option: ProductGrind) => option.split(' ')[0].toLowerCase();  // coarse | fine | roasted
 
 const navItems = [
   { label: 'Shop', href: '#shop' },
@@ -231,13 +264,13 @@ function ProductCard({
           aria-label={`View details for ${product.name}`}
           data-testid={`button-view-${product.id}`}
         >
-          <img src={product.image} alt={`${product.name} coffee pack`} className="max-h-[85%] max-w-[65%] object-contain drop-shadow-[0_14px_16px_rgba(55,25,10,.16)]" />
+          <ProductImage product={product} imgClassName="max-h-[85%] max-w-[65%] object-contain drop-shadow-[0_14px_16px_rgba(55,25,10,.16)]" tileClassName="h-[80%] w-[65%]" />
         </div>
       </div>
       <div className="flex flex-1 flex-col px-5 pb-5 pt-4">
         <h3 className="product-name text-xl leading-tight text-[#67232d]">{product.name}</h3>
         <p className="mt-1 text-xs text-[#9a7564]">{product.category} · {product.roast}</p>
-        <p className="mono mt-2 text-base font-semibold text-[#67232d]">{formatPrice(product.price)}</p>
+        <p className="mono mt-2 text-base font-semibold text-[#67232d]" data-testid={`text-price-${product.id}`}><span className="mr-1.5 text-[10px] font-medium uppercase tracking-[.12em] text-[#9a7564]">From</span>{formatPrice(startingPrice(product))}</p>
         <button
           type="button"
           onClick={(event) => { event.stopPropagation(); onAdd(product, event.currentTarget.getBoundingClientRect()); }}
@@ -294,7 +327,7 @@ function CartDrawer({
               {items.map(({ product, quantity }) => (
                 <div key={product.id} className="flex gap-4 border-b border-[#decdb9] pb-5" data-testid={`cart-item-${product.id}`}>
                   <div className="grid size-[82px] shrink-0 place-items-center rounded-xl border border-[#decdb9] bg-white p-1.5">
-                    <img src={product.image} alt="" className="max-h-full max-w-full object-contain" />
+                    <ProductImage product={product} imgClassName="max-h-full max-w-full object-contain" tileClassName="h-full w-full" small />
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex justify-between gap-2">
@@ -355,35 +388,35 @@ function BeanBounceLottie({ playKey }: { playKey: number }) {
 }
 
 const customerCountries = [
-  { name: 'India', x: 70.27, y: 43.56, customers: 20400 },
-  { name: 'United States', x: 26.14, y: 31.19, customers: 38700 },
-  { name: 'Canada', x: 26.51, y: 19.19, customers: 12300 },
-  { name: 'Mexico', x: 23.86, y: 42.83, customers: 7800 },
-  { name: 'Colombia', x: 30.83, y: 56.63, customers: 5200 },
-  { name: 'Brazil', x: 36.4, y: 66.76, customers: 14600 },
-  { name: 'Argentina', x: 34.11, y: 84.23, customers: 6100 },
-  { name: 'United Kingdom', x: 49.55, y: 20.55, customers: 27900 },
-  { name: 'Germany', x: 52.29, y: 22.63, customers: 18800 },
-  { name: 'France', x: 50.47, y: 25.8, customers: 15400 },
-  { name: 'Italy', x: 53, y: 28.65, customers: 9700 },
-  { name: 'Spain', x: 49.1, y: 30.46, customers: 8900 },
-  { name: 'Russia', x: 63.11, y: 17.85, customers: 6800 },
-  { name: 'Turkey', x: 58.52, y: 31.19, customers: 11200 },
-  { name: 'Egypt', x: 57.63, y: 40.65, customers: 5600 },
-  { name: 'Saudi Arabia', x: 61.51, y: 42.11, customers: 16300 },
-  { name: 'UAE', x: 63.81, y: 42.11, customers: 31700 },
-  { name: 'Nigeria', x: 52.09, y: 52.64, customers: 4900 },
-  { name: 'Kenya', x: 59.96, y: 59.17, customers: 3800 },
-  { name: 'South Africa', x: 56.06, y: 80.58, customers: 10500 },
-  { name: 'China', x: 75.73, y: 34.1, customers: 22100 },
-  { name: 'Japan', x: 84.01, y: 33.37, customers: 13400 },
-  { name: 'South Korea', x: 81.44, y: 33, customers: 8300 },
-  { name: 'Thailand', x: 76.27, y: 48.65, customers: 9100 },
-  { name: 'Sri Lanka', x: 71.15, y: 53.88, customers: 6400 },
-  { name: 'Singapore', x: 77.28, y: 58.55, customers: 17600 },
-  { name: 'Indonesia', x: 79.69, y: 60.98, customers: 7300 },
-  { name: 'Australia', x: 84.18, y: 77.67, customers: 19500 },
-  { name: 'New Zealand', x: 91.51, y: 89.31, customers: 4400 },
+  { name: 'India', x: 70.27, y: 43.56, customers: 52400 },
+  { name: 'United States', x: 26.14, y: 31.19, customers: 4800 },
+  { name: 'Canada', x: 26.51, y: 19.19, customers: 2100 },
+  { name: 'Mexico', x: 23.86, y: 42.83, customers: 1600 },
+  { name: 'Colombia', x: 30.83, y: 56.63, customers: 1300 },
+  { name: 'Brazil', x: 36.4, y: 66.76, customers: 2300 },
+  { name: 'Argentina', x: 34.11, y: 84.23, customers: 1400 },
+  { name: 'United Kingdom', x: 49.55, y: 20.55, customers: 3700 },
+  { name: 'Germany', x: 52.29, y: 22.63, customers: 2700 },
+  { name: 'France', x: 50.47, y: 25.8, customers: 2400 },
+  { name: 'Italy', x: 53, y: 28.65, customers: 1800 },
+  { name: 'Spain', x: 49.1, y: 30.46, customers: 1700 },
+  { name: 'Russia', x: 63.11, y: 17.85, customers: 1500 },
+  { name: 'Turkey', x: 58.52, y: 31.19, customers: 2000 },
+  { name: 'Egypt', x: 57.63, y: 40.65, customers: 1400 },
+  { name: 'Saudi Arabia', x: 61.51, y: 42.11, customers: 2500 },
+  { name: 'UAE', x: 63.81, y: 42.11, customers: 4100 },
+  { name: 'Nigeria', x: 52.09, y: 52.64, customers: 1300 },
+  { name: 'Kenya', x: 59.96, y: 59.17, customers: 1200 },
+  { name: 'South Africa', x: 56.06, y: 80.58, customers: 1900 },
+  { name: 'China', x: 75.73, y: 34.1, customers: 3100 },
+  { name: 'Japan', x: 84.01, y: 33.37, customers: 2200 },
+  { name: 'South Korea', x: 81.44, y: 33, customers: 1700 },
+  { name: 'Thailand', x: 76.27, y: 48.65, customers: 1700 },
+  { name: 'Sri Lanka', x: 71.15, y: 53.88, customers: 1500 },
+  { name: 'Singapore', x: 77.28, y: 58.55, customers: 2600 },
+  { name: 'Indonesia', x: 79.69, y: 60.98, customers: 1600 },
+  { name: 'Australia', x: 84.18, y: 77.67, customers: 2800 },
+  { name: 'New Zealand', x: 91.51, y: 89.31, customers: 1300 },
 ];
 const totalCustomers = customerCountries.reduce((sum, country) => sum + country.customers, 0);
 
@@ -470,7 +503,7 @@ function Storefront({ onSwitchBrand }: { onSwitchBrand: (originX: string, origin
   const [flyingBeans, setFlyingBeans] = useState<FlyingBean[]>([]);
   const [beanCartIcon, setBeanCartIcon] = useState(false);
   const [addSheetProduct, setAddSheetProduct] = useState<Product | null>(null);
-  const [sheetWeight, setSheetWeight] = useState<PackWeight>(packWeights[1]);
+  const [sheetGrams, setSheetGrams] = useState<number | null>(null);
   const [sheetGrind, setSheetGrind] = useState<ProductGrind>('Coarse (Filter)');
   const cartButtonRef = useRef<HTMLButtonElement>(null);
   const beanIdRef = useRef(0);
@@ -491,13 +524,13 @@ function Storefront({ onSwitchBrand }: { onSwitchBrand: (originX: string, origin
 
   const openAddSheet = (product: Product) => {
     setAddSheetProduct(product);
-    setSheetWeight(packWeights[1]);
+    setSheetGrams(null);
     setSheetGrind('Coarse (Filter)');
   };
 
   const openQuickView = (product: Product) => {
     setQuickView(product);
-    setSheetWeight(packWeights[1]);
+    setSheetGrams(null);
     setSheetGrind('Coarse (Filter)');
   };
 
@@ -573,6 +606,17 @@ function Storefront({ onSwitchBrand }: { onSwitchBrand: (originX: string, origin
     }
     document.querySelector(href)?.scrollIntoView({ behavior: 'smooth' });
   };
+
+  const isDecoction = (product: Product | null) => product?.category === 'Decoction';
+  // Selected size for each sheet: what the customer tapped, else the product's default size.
+  const pickSize = (product: Product | null): SizeOption | null => {
+    const sizes = product?.sizes ?? [];
+    return sizes.find((size) => size.grams === sheetGrams) ?? sizes.find((size) => size.isDefault) ?? sizes[0] ?? null;
+  };
+  const quickOptions = quickView?.sizes ?? [];
+  const quickUnit = pickSize(quickView);
+  const addOptions = addSheetProduct?.sizes ?? [];
+  const addUnit = pickSize(addSheetProduct);
 
   return (
     <div className="grain min-h-[100dvh] overflow-x-clip bg-[#f8f1e8] text-[#67232d]">
@@ -709,7 +753,7 @@ function Storefront({ onSwitchBrand }: { onSwitchBrand: (originX: string, origin
             </div>
             <div className="max-w-[570px] lg:justify-self-end">
               <p className="text-lg leading-[1.65] text-[#f7dec1]">Gayathri Coffee Works began in 1950, when Mr. DC Varadaraja Setty started roasting and selling coffee from Mysore — door to door, by bicycle. No shortcuts, no additives, just time and care in every batch.</p>
-              <p className="mt-6 text-[14px] leading-[1.75] text-[#d9bfa9]">In 1982, Mr. DV Ravikumar carried the roastery forward, and by 2002 our blends had reached the aromatic lanes of Malleshwaram, Bengaluru. In 2013, we became the first in Mysore to roast with German precision technology — without losing the hand-roasted soul we started with.</p>
+              <p className="mt-6 text-[14px] leading-[1.75] text-[#d9bfa9]">Mr. DV Ravikumar later carried the roastery forward, and by 2002 our blends had reached the aromatic lanes of Malleshwaram, Bengaluru. In 2013, we became the first in Mysore to roast with German precision technology — without losing the hand-roasted soul we started with.</p>
               <button type="button" onClick={() => scrollTo('#ritual')} className="mt-8 flex items-center gap-3 border-b border-[#c9a15a] pb-2 text-xs font-semibold uppercase tracking-[.16em] text-[#c9a15a]" data-testid="button-discover-story">Discover the ritual <ArrowRight size={15} /></button>
             </div>
           </div>
@@ -880,9 +924,7 @@ function Storefront({ onSwitchBrand }: { onSwitchBrand: (originX: string, origin
               </div>
             </div>
             <div className="lg:pl-12">
-              <div className="mb-7 flex gap-1 text-[#b83a36]">{[1, 2, 3, 4, 5].map((star) => <Star key={star} size={15} fill="currentColor" />)}</div>
-              <blockquote className="serif text-3xl leading-[1.2] text-[#67232d] sm:text-4xl">“It tastes like the coffee my mother made, only better because I did not have to leave home.”</blockquote>
-              <p className="mono mt-7 text-[10px] uppercase tracking-[.18em] text-[#9a7564]">— Ananya, Bengaluru</p>
+              <ReviewSlider reviews={gayathriReviews} />
               <div className="mt-12 border-t border-[#decdb9] pt-6"><p className="text-sm leading-[1.7] text-[#775e53]">Not sure where to start?</p><button type="button" onClick={() => scrollTo(`#${categorySlug('Coffee Powder')}`)} className="mt-3 flex items-center gap-2 text-sm font-semibold text-[#b83a36]" data-testid="button-start-signature">Start with our signatures <ArrowRight size={15} /></button></div>
             </div>
           </div>
@@ -897,14 +939,34 @@ function Storefront({ onSwitchBrand }: { onSwitchBrand: (originX: string, origin
       </main>
 
       <footer className="bg-[#f8f1e8]">
-        <div className="mx-auto grid max-w-[1400px] gap-10 px-5 py-14 sm:px-8 md:grid-cols-[1.4fr_1fr_1fr_1fr] lg:px-12">
+        <div className="mx-auto grid max-w-[1400px] gap-10 px-5 py-14 sm:px-8 md:grid-cols-[1fr_.6fr_1fr_2fr_.7fr] lg:px-12">
           <div><img src={logoPath} alt="Gayathri Coffee" className="h-[84px] w-auto object-contain object-left" /><p className="mt-5 max-w-[230px] text-xs leading-[1.7] text-[#775e53]">A Mysore-rooted coffee house for the everyday ritual.</p></div>
           <div><p className="mono text-[10px] uppercase tracking-[.18em] text-[#9a7564]">Explore</p><div className="mt-4 space-y-3 text-sm text-[#67232d]">{navItems.map((item) => <button type="button" key={item.href} onClick={() => scrollTo(item.href)} className="block hover:text-[#b83a36]" data-testid={`footer-link-${item.label.toLowerCase().replace(' ', '-')}`}>{item.label}</button>)}</div></div>
-          <div><p className="mono text-[10px] uppercase tracking-[.18em] text-[#9a7564]">Visit</p><div className="mt-4 space-y-2 text-sm leading-relaxed text-[#67232d]"><p>Gayathri Coffee Works</p><p>Duplin Complex, Shivram­pet</p><p>Mysore — 570 001</p></div></div>
-          <div><p className="mono text-[10px] uppercase tracking-[.18em] text-[#9a7564]">Say hello</p><a href="mailto:hello@gayathricoffee.in" className="mt-4 block text-sm text-[#67232d] hover:text-[#b83a36]" data-testid="link-email">hello@gayathricoffee.in</a><a href="https://www.instagram.com" target="_blank" rel="noreferrer" className="mt-5 inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[.12em] text-[#b83a36]" data-testid="link-instagram"><Instagram size={16} /> Instagram</a></div>
+          <div data-testid="footer-customer-care">
+            <p className="mono text-[10px] uppercase tracking-[.18em] text-[#9a7564]">Customer care</p>
+            <div className="mt-4 space-y-3 text-sm">
+              <a href={`tel:${CUSTOMER_CARE_PHONE}`} className="flex items-center gap-2 font-semibold text-[#67232d] hover:text-[#b83a36]" data-testid="link-care-call"><Phone size={14} /> Call {CUSTOMER_CARE_PHONE}</a>
+              <a href={`https://wa.me/91${CUSTOMER_CARE_WHATSAPP}`} target="_blank" rel="noreferrer" className="flex items-center gap-2 font-semibold text-[#67232d] hover:text-[#b83a36]" data-testid="link-care-whatsapp"><MessageCircle size={14} /> WhatsApp {CUSTOMER_CARE_WHATSAPP}</a>
+            </div>
+          </div>
+          <div>
+            <p className="mono text-[10px] uppercase tracking-[.18em] text-[#9a7564]">Visit us</p>
+            <div className="mt-4 grid gap-6 sm:grid-cols-2">
+              {storeAddresses.map((store) => (
+                <address key={store.city} className="text-sm not-italic leading-relaxed text-[#67232d]" data-testid={`footer-address-${store.city.toLowerCase()}`}>
+                  <p className="font-semibold">{store.city}</p>
+                  {store.lines.map((line) => <p key={line} className="text-[#775e53]">{line}</p>)}
+                  <a href={`tel:+91${store.phone}`} className="mt-1 inline-flex items-center gap-1.5 text-[#775e53] hover:text-[#b83a36]" data-testid={`link-phone-${store.city.toLowerCase()}`}><Phone size={13} /> {store.phone}</a>
+                  <a href={store.mapUrl} target="_blank" rel="noreferrer" className="mt-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[.1em] text-[#b83a36]" data-testid={`link-map-${store.city.toLowerCase()}`}><MapPin size={13} /> View on map</a>
+                </address>
+              ))}
+            </div>
+          </div>
+          <div><p className="mono text-[10px] uppercase tracking-[.18em] text-[#9a7564]">Say hello</p><a href={GAYATHRI_INSTAGRAM_URL} target="_blank" rel="noreferrer" className="mt-4 inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[.12em] text-[#b83a36]" data-testid="link-instagram"><Instagram size={16} /> Instagram</a></div>
         </div>
         <div className="border-t border-[#decdb9] px-5 py-5 text-center text-[10px] uppercase tracking-[.12em] text-[#9a7564] sm:px-8 lg:px-12">
           © 2024 Gayathri Coffee Works · Quality is our motto · <a href="/privacy-policy" className="hover:text-[#b83a36]" data-testid="link-privacy-policy">Privacy Policy</a>
+          <div><DesignCredit /></div>
         </div>
       </footer>
 
@@ -915,7 +977,7 @@ function Storefront({ onSwitchBrand }: { onSwitchBrand: (originX: string, origin
           <div className="relative grid max-h-[90vh] w-full max-w-[850px] overflow-auto rounded-[1.7rem] bg-[#f8f1e8] shadow-2xl md:grid-cols-2">
             <button type="button" onClick={() => setQuickView(null)} className="absolute right-4 top-4 z-10 grid size-10 place-items-center rounded-full bg-[#f8f1e8]/85 text-[#67232d]" aria-label="Close details" data-testid="button-close-quick-view"><X size={18} /></button>
             <div className="grid min-h-[350px] place-items-center bg-white p-10">
-              <img src={quickView.image} alt={`${quickView.name} coffee pack`} className="max-h-[320px] max-w-[75%] object-contain drop-shadow-[0_16px_16px_rgba(55,25,10,.14)]" />
+              <ProductImage product={quickView} imgClassName="max-h-[320px] max-w-[75%] object-contain drop-shadow-[0_16px_16px_rgba(55,25,10,.14)]" tileClassName="h-[300px] w-[75%]" />
             </div>
             <div className="flex flex-col justify-center p-8 sm:p-10">
               <p className="mono text-[10px] uppercase tracking-[.2em] text-[#b83a36]">{quickView.category} · {quickView.roast}</p>
@@ -927,14 +989,14 @@ function Storefront({ onSwitchBrand }: { onSwitchBrand: (originX: string, origin
               </div>
 
               <div className="mt-6">
-                <p className="mono text-[10px] uppercase tracking-[.18em] text-[#9a7564]">Weight</p>
+                <p className="mono text-[10px] uppercase tracking-[.18em] text-[#9a7564]">{isDecoction(quickView) ? 'Volume' : 'Weight'}</p>
                 <div className="mt-3 grid grid-cols-3 gap-2">
-                  {packWeights.map((weight) => (
+                  {quickOptions.map((weight) => (
                     <button
                       key={weight.label}
                       type="button"
-                      onClick={() => setSheetWeight(weight)}
-                      className={`rounded-xl border px-3 py-2.5 text-xs font-semibold transition-colors ${sheetWeight.label === weight.label ? 'border-[#67232d] bg-[#67232d] text-[#f9e7c5]' : 'border-[#decdb9] text-[#775e53] hover:border-[#c9a15a]'}`}
+                      onClick={() => setSheetGrams(weight.grams)}
+                      className={`rounded-xl border px-3 py-2.5 text-xs font-semibold transition-colors ${quickUnit?.label === weight.label ? 'border-[#67232d] bg-[#67232d] text-[#f9e7c5]' : 'border-[#decdb9] text-[#775e53] hover:border-[#c9a15a]'}`}
                       data-testid={`button-quick-weight-${weight.grams}`}
                     >
                       {weight.label}
@@ -943,35 +1005,37 @@ function Storefront({ onSwitchBrand }: { onSwitchBrand: (originX: string, origin
                 </div>
               </div>
 
+              {!isDecoction(quickView) ? (
               <div className="mt-5">
                 <p className="mono text-[10px] uppercase tracking-[.18em] text-[#9a7564]">Grind</p>
-                <div className="mt-3 grid grid-cols-2 gap-2">
-                  {productGrindOptions.map((option) => (
+                <div className={`mt-3 grid gap-2 ${grindOptionsFor(quickView).length === 3 ? 'grid-cols-3' : 'grid-cols-2'}`}>
+                  {grindOptionsFor(quickView).map((option) => (
                     <button
                       key={option}
                       type="button"
                       onClick={() => setSheetGrind(option)}
                       className={`rounded-xl border px-3 py-3 text-xs font-semibold transition-colors ${sheetGrind === option ? 'border-[#b83a36] bg-[#b83a36] text-[#fdf8f1]' : 'border-[#decdb9] text-[#775e53] hover:border-[#c9a15a]'}`}
-                      data-testid={`button-quick-grind-${option.startsWith('Coarse') ? 'coarse' : 'fine'}`}
+                      data-testid={`button-quick-grind-${grindTestId(option)}`}
                     >
                       {option}
                     </button>
                   ))}
                 </div>
               </div>
+              ) : null}
 
               <div className="mt-7 flex items-center justify-between gap-4">
-                <span className="mono text-lg font-medium text-[#67232d]">{formatPrice(Math.round(quickView.price * sheetWeight.factor))}</span>
+                <span className="mono text-lg font-medium text-[#67232d]">{formatPrice(quickUnit?.price ?? quickView.price)}</span>
                 <button
                   type="button"
                   onClick={(event) => {
-                    const finalPrice = Math.round(quickView.price * sheetWeight.factor);
+                    const finalPrice = quickUnit?.price ?? quickView.price;
                     const variant: Product = {
                       ...quickView,
-                      id: `${quickView.id}-${sheetWeight.grams}-${sheetGrind}`,
-                      name: `${quickView.name} · ${sheetWeight.label} · ${sheetGrind}`,
+                      id: `${quickView.id}-${quickUnit?.grams ?? quickView.weightGrams}${isDecoction(quickView) ? '' : `-${sheetGrind}`}`,
+                      name: `${quickView.name} · ${quickUnit?.label ?? ''}${isDecoction(quickView) ? '' : ` · ${sheetGrind}`}`,
                       price: finalPrice,
-                      weightGrams: sheetWeight.grams,
+                      weightGrams: quickUnit?.grams ?? quickView.weightGrams,
                     };
                     addToCart(variant, event.currentTarget.getBoundingClientRect());
                     setQuickView(null);
@@ -996,24 +1060,24 @@ function Storefront({ onSwitchBrand }: { onSwitchBrand: (originX: string, origin
             <div className="max-h-[68vh] overflow-auto px-6 pb-4 pt-3 sm:max-h-[62vh] sm:pt-6">
               <div className="flex items-center gap-4">
                 <div className="grid size-20 shrink-0 place-items-center rounded-2xl border border-[#decdb9] bg-white p-2">
-                  <img src={addSheetProduct.image} alt="" className="max-h-full max-w-full object-contain" />
+                  <ProductImage product={addSheetProduct} imgClassName="max-h-full max-w-full object-contain" tileClassName="h-full w-full" small />
                 </div>
                 <div className="min-w-0">
                   <h3 className="product-name truncate text-xl text-[#67232d]">{addSheetProduct.name}</h3>
                   <p className="mt-0.5 text-xs text-[#9a7564]">{addSheetProduct.category} · {addSheetProduct.roast}</p>
-                  <p className="mono mt-1 text-base font-semibold text-[#67232d]">{formatPrice(Math.round(addSheetProduct.price * sheetWeight.factor))}</p>
+                  <p className="mono mt-1 text-base font-semibold text-[#67232d]">{formatPrice(addUnit?.price ?? addSheetProduct.price)}</p>
                 </div>
               </div>
 
               <div className="mt-6">
-                <p className="mono text-[10px] uppercase tracking-[.18em] text-[#9a7564]">Weight</p>
+                <p className="mono text-[10px] uppercase tracking-[.18em] text-[#9a7564]">{isDecoction(addSheetProduct) ? 'Volume' : 'Weight'}</p>
                 <div className="mt-3 grid grid-cols-3 gap-2">
-                  {packWeights.map((weight) => (
+                  {addOptions.map((weight) => (
                     <button
                       key={weight.label}
                       type="button"
-                      onClick={() => setSheetWeight(weight)}
-                      className={`rounded-xl border px-3 py-2.5 text-xs font-semibold transition-colors ${sheetWeight.label === weight.label ? 'border-[#67232d] bg-[#67232d] text-[#f9e7c5]' : 'border-[#decdb9] text-[#775e53] hover:border-[#c9a15a]'}`}
+                      onClick={() => setSheetGrams(weight.grams)}
+                      className={`rounded-xl border px-3 py-2.5 text-xs font-semibold transition-colors ${addUnit?.label === weight.label ? 'border-[#67232d] bg-[#67232d] text-[#f9e7c5]' : 'border-[#decdb9] text-[#775e53] hover:border-[#c9a15a]'}`}
                       data-testid={`button-weight-${weight.grams}`}
                     >
                       {weight.label}
@@ -1022,35 +1086,37 @@ function Storefront({ onSwitchBrand }: { onSwitchBrand: (originX: string, origin
                 </div>
               </div>
 
+              {!isDecoction(addSheetProduct) ? (
               <div className="mt-6">
                 <p className="mono text-[10px] uppercase tracking-[.18em] text-[#9a7564]">Grind</p>
-                <div className="mt-3 grid grid-cols-2 gap-2">
-                  {productGrindOptions.map((option) => (
+                <div className={`mt-3 grid gap-2 ${grindOptionsFor(addSheetProduct).length === 3 ? 'grid-cols-3' : 'grid-cols-2'}`}>
+                  {grindOptionsFor(addSheetProduct).map((option) => (
                     <button
                       key={option}
                       type="button"
                       onClick={() => setSheetGrind(option)}
                       className={`rounded-xl border px-3 py-3 text-xs font-semibold transition-colors ${sheetGrind === option ? 'border-[#b83a36] bg-[#b83a36] text-[#fdf8f1]' : 'border-[#decdb9] text-[#775e53] hover:border-[#c9a15a]'}`}
-                      data-testid={`button-grind-${option.startsWith('Coarse') ? 'coarse' : 'fine'}`}
+                      data-testid={`button-grind-${grindTestId(option)}`}
                     >
                       {option}
                     </button>
                   ))}
                 </div>
               </div>
+              ) : null}
             </div>
 
             <div className="border-t border-[#decdb9] bg-[#f1e5d8] px-6 py-5" style={{ paddingBottom: 'max(1.25rem, env(safe-area-inset-bottom))' }}>
               <button
                 type="button"
                 onClick={(event) => {
-                  const finalPrice = Math.round(addSheetProduct.price * sheetWeight.factor);
+                  const finalPrice = addUnit?.price ?? addSheetProduct.price;
                   const variant: Product = {
                     ...addSheetProduct,
-                    id: `${addSheetProduct.id}-${sheetWeight.grams}-${sheetGrind}`,
-                    name: `${addSheetProduct.name} · ${sheetWeight.label} · ${sheetGrind}`,
+                    id: `${addSheetProduct.id}-${addUnit?.grams ?? addSheetProduct.weightGrams}${isDecoction(addSheetProduct) ? '' : `-${sheetGrind}`}`,
+                    name: `${addSheetProduct.name} · ${addUnit?.label ?? ''}${isDecoction(addSheetProduct) ? '' : ` · ${sheetGrind}`}`,
                     price: finalPrice,
-                    weightGrams: sheetWeight.grams,
+                    weightGrams: addUnit?.grams ?? addSheetProduct.weightGrams,
                   };
                   addToCart(variant, event.currentTarget.getBoundingClientRect());
                   setAddSheetProduct(null);
@@ -1058,7 +1124,7 @@ function Storefront({ onSwitchBrand }: { onSwitchBrand: (originX: string, origin
                 className="flex w-full items-center justify-center gap-3 rounded-full bg-[#b83a36] px-5 py-4 text-sm font-semibold text-[#fdf8f1] transition-transform hover:-translate-y-0.5"
                 data-testid="button-confirm-add-to-cart"
               >
-                Add to basket <span className="mono">· {formatPrice(Math.round(addSheetProduct.price * sheetWeight.factor))}</span>
+                Add to basket <span className="mono">· {formatPrice(addUnit?.price ?? addSheetProduct.price)}</span>
               </button>
             </div>
           </div>
@@ -1083,127 +1149,298 @@ const heritageTestimonials = [
   { quote: 'The onion pakoda and bread pakoda were crispy, fresh, and super delicious.', author: 'Google review' },
 ];
 
+// Flip to true once the real MHC photos replace the placeholders in heritageGallery.
+const SHOW_HERITAGE_GALLERY = false;
+
+const heritageGallery = [
+  { src: heroPath, alt: 'The MHC roastery', title: 'The roastery', subtitle: 'Mysore' },
+  { src: '/categories/coffee.jpg', alt: 'Freshly roasted coffee beans', title: 'Fresh roast', subtitle: 'Hand-roasted' },
+  { src: '/categories/decoction.jpg', alt: 'Filter coffee decoction', title: 'Decoction', subtitle: 'Brass filter' },
+  { src: '/categories/premium-coffee.jpg', alt: 'Premium coffee blend', title: 'Premium blends', subtitle: 'Estate-grown' },
+  { src: '/categories/pure-coffee.png', alt: 'Pure coffee', title: 'Pure coffee', subtitle: 'No additives' },
+  { src: '/categories/tea.jpg', alt: 'Tea', title: 'Tea', subtitle: 'Warm cups' },
+];
+
+const MHC_INSTAGRAM_URL = 'https://instagram.com/mysore_heritage_coffee?stkn=MWc2NWVkazVhMXB5NQ%3D%3D';
+const GAYATHRI_INSTAGRAM_URL = 'https://instagram.com/gayathri.coffee?stkn=ZndkNGtzcXBxcnRw';
+// Number exactly as supplied (9 digits) — double-check it before launch, a customer can't dial it as-is.
+const CUSTOMER_CARE_PHONE = '914173288';
+const CUSTOMER_CARE_WHATSAPP = '8050033791';
+const storeAddresses = [
+  { city: 'Mysuru', lines: ['Gayathri Coffee Works (Head Office)', 'No. 7, Duplin Complex, Shivarampet', 'Mysuru — 570001'], phone: '9141737266', mapUrl: 'https://share.google/7Q5h2qo5Z7Pja8hNS' },
+  { city: 'Bengaluru', lines: ['Gayathri Coffee Works (Branch)', 'No. 172, Between 8th & 10th Cross, Sampige Main Road', 'Malleshwaram, Bengaluru — 560003'], phone: '8277288068', mapUrl: 'https://share.google/Kb0dotUZIjmZyE2Lv' },
+];
+
+// A slide with an author is a customer review (shows stars); without one it is a plain brand highlight.
+type Review = { quote: string; author?: string };
+
+// Swipeable row of review cards: snaps card-by-card on touch, scrolls sideways on desktop.
+// Renders nothing until there are reviews to show.
+function ReviewsSection({ reviews }: { reviews: Review[] }) {
+  if (reviews.length === 0) return null;
+  return (
+    <section className="border-y border-[#e2d5c1] bg-[#fdf8f1]">
+      <div className="mx-auto max-w-[1200px] px-5 py-16 sm:px-8 sm:py-20 lg:px-12">
+        <div className="text-center">
+          <p className="mono text-[10px] uppercase tracking-[.22em] text-[#b83a36]">What people say</p>
+          <h2 className="serif mt-3 text-3xl text-[#67232d] sm:text-4xl">Loved by regulars.</h2>
+        </div>
+        <div className="-mx-5 mt-10 flex snap-x snap-mandatory gap-5 overflow-x-auto px-5 pb-4 sm:mx-0 sm:px-0" data-testid="reviews-scroller">
+          {reviews.map((review) => (
+            <div key={review.quote} className="w-[82%] shrink-0 snap-start rounded-[1.3rem] border border-[#e2d5c1] bg-white p-6 sm:w-[360px]">
+              <div className="flex gap-1 text-[#b83a36]">{[1, 2, 3, 4, 5].map((star) => <Star key={star} size={13} fill="currentColor" />)}</div>
+              <p className="mt-4 text-sm leading-[1.7] text-[#775e53]">"{review.quote}"</p>
+              {review.author ? <p className="mono mt-4 text-[10px] uppercase tracking-[.16em] text-[#9a7564]">— {review.author}</p> : null}
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// Swipeable slides. Add real customer reviews (with an author) here as you collect them; entries without an author render as brand highlights.
+const gayathriReviews: Review[] = [
+  { quote: 'It tastes like the coffee my mother made, only better because I did not have to leave home.', author: 'Ananya, Bengaluru' },
+  { quote: 'Hand-roasted in Mysore since 1950 — no shortcuts, no additives, just time and care in every batch.' },
+  { quote: 'Arabica and Robusta from the coffee estates of Chikkamagaluru and Coorg, roasted fresh and ground the way your filter likes it.' },
+  { quote: 'The first in Mysore to roast with German precision technology — without losing the hand-roasted soul we started with.' },
+  { quote: 'Blend two coffee types, dial in your chicory and your grind — and we roast it just for you.' },
+  { quote: 'Packed fresh at our roastery and shipped across India, from our Mysuru and Bengaluru doorsteps to yours.' },
+];
+
+// Large-quote review slider: swipe on touch, arrow buttons on desktop.
+function ReviewSlider({ reviews }: { reviews: Review[] }) {
+  const trackRef = useRef<HTMLDivElement>(null);
+  const [index, setIndex] = useState(0);
+  const go = (delta: number) => {
+    const track = trackRef.current;
+    if (track) track.scrollBy({ left: delta * track.clientWidth, behavior: 'smooth' });
+  };
+  return (
+    <div data-testid="review-slider">
+      <div
+        ref={trackRef}
+        onScroll={(e) => setIndex(Math.round(e.currentTarget.scrollLeft / e.currentTarget.clientWidth))}
+        className="flex snap-x snap-mandatory overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
+        {reviews.map((review) => (
+          <figure key={review.quote} className="m-0 w-full shrink-0 snap-start pr-1">
+            {review.author ? (
+              <div className="mb-7 flex gap-1 text-[#b83a36]">{[1, 2, 3, 4, 5].map((star) => <Star key={star} size={15} fill="currentColor" />)}</div>
+            ) : (
+              <p className="mono mb-7 text-[10px] uppercase tracking-[.22em] text-[#b83a36]">The Gayathri way</p>
+            )}
+            <blockquote className="serif text-3xl leading-[1.2] text-[#67232d] sm:text-4xl">{review.author ? `“${review.quote}”` : review.quote}</blockquote>
+            {review.author ? <figcaption className="mono mt-7 text-[10px] uppercase tracking-[.18em] text-[#9a7564]">— {review.author}</figcaption> : null}
+          </figure>
+        ))}
+      </div>
+      {reviews.length > 1 ? (
+        <div className="mt-8 flex items-center gap-4">
+          <button type="button" onClick={() => go(-1)} disabled={index === 0} aria-label="Previous review" className="grid size-9 place-items-center rounded-full border border-[#decdb9] text-[#67232d] disabled:opacity-30" data-testid="button-review-prev"><ArrowRight size={15} className="rotate-180" /></button>
+          <button type="button" onClick={() => go(1)} disabled={index >= reviews.length - 1} aria-label="Next review" className="grid size-9 place-items-center rounded-full border border-[#decdb9] text-[#67232d] disabled:opacity-30" data-testid="button-review-next"><ArrowRight size={15} /></button>
+          <div className="flex gap-1.5" aria-hidden="true">{reviews.map((review, i) => <span key={review.quote} className={`h-1.5 rounded-full transition-all ${i === index ? 'w-5 bg-[#b83a36]' : 'w-1.5 bg-[#decdb9]'}`} />)}</div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function DesignCredit() {
+  return (
+    <a
+      href="https://adsnapproductions.in"
+      target="_blank"
+      rel="noreferrer"
+      className="mt-4 inline-flex items-center justify-center gap-2 text-[10px] uppercase tracking-[.14em] text-[#9a7564] transition-opacity hover:opacity-80"
+      data-testid="link-adsnap-credit"
+    >
+      Designed and developed by <img src="/adsnap-logo.svg" alt="Adsnap Productions" className="h-4 w-auto" />
+    </a>
+  );
+}
+
 function MysoreHeritageLanding() {
   return (
-    <div className="min-h-[100dvh] bg-[#1a0e05] text-[#f3e6cf]">
-      <div className="bg-[#c9a15a] px-4 py-2 text-center text-[10px] font-semibold uppercase tracking-[.2em] text-[#241202]">
-        Avail 15% off your first order — use code <span className="font-bold">COFFEELOVE</span>
-      </div>
-
+    <div className="min-h-[100dvh] bg-[#f8f1e8] text-[#67232d]">
       <section className="pattern-bg relative overflow-hidden px-5 py-16 text-center sm:py-24" style={{ '--pattern-opacity': '.05', '--pattern-blend': 'soft-light' } as CSSProperties}>
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(201,161,90,.16),transparent_60%)]" />
         <div className="relative mx-auto max-w-[720px]">
           <img src={heritageLogo} alt="MHC" className="mx-auto h-28 w-28 rounded-full object-cover shadow-[0_20px_50px_rgba(0,0,0,.5)] sm:h-36 sm:w-36" />
-          <p className="mono mt-8 text-[11px] uppercase tracking-[.3em] text-[#c9a15a]">A taste of Mysore's heritage</p>
-          <h1 className="serif mt-4 text-4xl leading-[1.05] text-[#f8ecd4] sm:text-6xl">Experience the<br /><em className="text-[#c9a15a]">Heritage</em> of Mysore</h1>
-          <p className="mx-auto mt-6 max-w-[480px] text-sm leading-[1.8] text-[#d8c2a0] sm:text-base">Authentic South Indian filter coffee, crafted with tradition since 1982.</p>
+          <p className="mono mt-8 text-[11px] uppercase tracking-[.3em] text-[#b83a36]">A taste of Mysore's heritage</p>
+          <h1 className="serif mt-4 text-4xl leading-[1.05] text-[#67232d] sm:text-6xl">Experience the<br /><em className="text-[#b83a36]">Heritage</em> of Mysore</h1>
+          <p className="mx-auto mt-6 max-w-[480px] text-sm leading-[1.8] text-[#775e53] sm:text-base">Authentic South Indian filter coffee, crafted with tradition since 1950.</p>
           <div className="mt-9 flex flex-wrap items-center justify-center gap-4">
-            <a href="#bestsellers" className="rounded-full bg-[#c9a15a] px-7 py-3.5 text-xs font-semibold uppercase tracking-[.14em] text-[#241202] transition-transform hover:-translate-y-0.5">View the menu</a>
-            <a href="#visit" className="border-b border-[#c9a15a]/60 pb-1 text-xs font-semibold uppercase tracking-[.14em] text-[#f3e6cf]">Visit us</a>
+            <a href="#bestsellers" className="rounded-full bg-[#67232d] px-7 py-3.5 text-xs font-semibold uppercase tracking-[.14em] text-[#f9e7c5] transition-transform hover:-translate-y-0.5">View the menu</a>
+            <a href="#visit" className="border-b border-[#b83a36]/60 pb-1 text-xs font-semibold uppercase tracking-[.14em] text-[#67232d]">Visit us</a>
           </div>
         </div>
       </section>
 
-      <section className="mx-auto grid max-w-[1200px] gap-12 px-5 py-16 sm:px-8 sm:py-20 lg:grid-cols-[1fr_1fr] lg:items-center lg:px-12">
-        <div className="overflow-hidden rounded-[2rem] border border-[#c9a15a]/20">
-          <img src={heroPath} alt="MHC roastery" className="h-[320px] w-full object-cover brightness-[.55] sepia-[.35] sm:h-[400px]" />
+      <section id="story" className="pattern-bg relative overflow-hidden bg-[#67232d] text-[#f9e7c5]" style={{ '--pattern-opacity': '.1', '--pattern-blend': 'soft-light' } as CSSProperties}>
+        <div className="absolute -right-32 -top-32 size-[430px] rounded-full border border-[#c9a15a]/20" /><div className="absolute -right-12 -top-12 size-[270px] rounded-full border border-[#c9a15a]/20" />
+        <div className="mx-auto grid max-w-[1200px] gap-12 px-5 py-20 sm:px-8 md:py-28 lg:grid-cols-[.8fr_1.2fr] lg:items-center lg:px-12">
+          <div className="relative">
+            <div className="absolute -left-5 top-8 h-28 w-1 bg-[#c9a15a]" />
+            <p className="mono text-[10px] uppercase tracking-[.22em] text-[#c9a15a]">Mysore, Karnataka · A Gayathri Coffee Works café</p>
+            <h2 className="serif mt-5 max-w-[510px] text-5xl leading-[.98] tracking-[-.04em] sm:text-7xl">Mysore's coffee, <em>poured the old way.</em></h2>
+          </div>
+          <div className="max-w-[570px] lg:justify-self-end">
+            <p className="text-lg leading-[1.65] text-[#f7dec1]">Mysore Heritage Coffee is where the Gayathri Coffee Works legacy steps into a café. Since 1950, Mr. DC Varadaraja Setty's hand-roasted coffee has carried the soul of Karnataka's finest estates — now served fresh, the way Mysore has always loved it.</p>
+            <p className="mt-6 text-[14px] leading-[1.75] text-[#d9bfa9]">Inspired by the timeless coffee traditions of Mysuru, we bring together beans from Coorg and Chikmagalur, traditional filter brewing and warm hospitality — served in a davara and tumbler, with no shortcuts and no additives.</p>
+            <a href="#bestsellers" className="mt-8 inline-flex items-center gap-3 border-b border-[#c9a15a] pb-2 text-xs font-semibold uppercase tracking-[.16em] text-[#c9a15a]">See the menu <ArrowRight size={15} /></a>
+          </div>
         </div>
-        <div>
-          <p className="mono text-[10px] uppercase tracking-[.22em] text-[#c9a15a]">Our story</p>
-          <h2 className="serif mt-3 text-3xl leading-tight text-[#f8ecd4] sm:text-4xl">Karnataka's coffee culture, in every cup.</h2>
-          <p className="mt-6 text-sm leading-[1.85] text-[#d8c2a0]">Mysore Heritage Coffee is where the Gayathri Coffee Works legacy steps into a café. Since 1950, Mr. DC Varadaraja Setty's hand-roasted, stone-ground coffee has carried the soul of Karnataka's finest estates — a promise his successor, Mr. DV Ravikumar, has carried forward since 1982.</p>
-          <p className="mt-4 text-sm leading-[1.85] text-[#d8c2a0]">Inspired by the timeless coffee traditions of Mysuru, we bring together estate-grown beans from Coorg and Chikmagalur, traditional brass-filter brewing, and warm hospitality — served the way it's always been, in a davara and tumbler.</p>
+      </section>
+
+      <section id="heritage" className="mx-auto max-w-[1200px] px-5 py-20 sm:px-8 md:py-28 lg:px-12">
+        <div className="grid gap-12 lg:grid-cols-[1fr_1fr] lg:items-center">
+          <div className="rounded-[2rem] border border-[#e2d5c1] bg-[#fdf8f1] p-8 sm:p-12">
+            <p className="mono text-[10px] uppercase tracking-[.22em] text-[#b83a36]">About us</p>
+            <h2 className="serif mt-4 text-4xl leading-tight text-[#67232d] sm:text-5xl">A café built on Mysore's coffee heritage.</h2>
+            <p className="mt-6 text-sm leading-[1.8] text-[#775e53]">What began as a bicycle coffee round in Mysore grew into a roastery trusted across Karnataka. Mysore Heritage Coffee brings that same care to the cup — freshly brewed South Indian filter coffee made from carefully selected Arabica and Robusta from the plantations of Coorg and Chikkamagaluru.</p>
+            <div className="mt-8 grid gap-4">
+              <div className="flex items-center gap-3 rounded-2xl border border-[#e2d5c1] px-4 py-4">
+                <MapPin size={20} className="shrink-0 text-[#b83a36]" />
+                <span className="text-sm font-semibold text-[#67232d]">Beans from the Coorg and Chikkamagaluru plantations, roasted by Gayathri Coffee Works in Mysore.</span>
+              </div>
+              <div className="flex items-center gap-3 rounded-2xl border border-[#e2d5c1] px-4 py-4">
+                <Coffee size={20} className="shrink-0 text-[#b83a36]" />
+                <span className="text-sm font-semibold text-[#67232d]">Traditional filter brewing — rich aroma, smooth texture and bold flavour in every cup.</span>
+              </div>
+              <div className="flex items-center gap-3 rounded-2xl border border-[#e2d5c1] px-4 py-4">
+                <Sparkles size={20} className="shrink-0 text-[#b83a36]" />
+                <span className="text-sm font-semibold text-[#67232d]">Served the way it's always been: in a davara and tumbler, with warm Mysore hospitality.</span>
+              </div>
+            </div>
+          </div>
+          <div className="rounded-[2rem] bg-[#67232d] p-8 text-[#f9e7c5] shadow-[0_24px_50px_rgba(86,27,35,.20)] sm:p-12">
+            <p className="mono text-[10px] uppercase tracking-[.22em] text-[#c9a15a]">Our heritage</p>
+            <div className="mt-7 space-y-6">
+              <div className="border-b border-[#f9e7c5]/30 pb-5">
+                <span className="serif text-5xl leading-none">1950</span>
+                <p className="mt-2 text-sm leading-[1.7] text-[#f7dec1]">Mr. DC Varadaraja Setty starts roasting and selling coffee in Mysore, door to door by bicycle. Mr. DV Ravikumar later carries the roastery forward, keeping every batch hand-roasted.</p>
+              </div>
+              <div>
+                <span className="serif text-5xl leading-none">Today</span>
+                <p className="mt-2 text-sm leading-[1.7] text-[#f7dec1]">Mysore Heritage Coffee opens its doors — the tradition steps into a café.</p>
+              </div>
+            </div>
+          </div>
         </div>
       </section>
 
       <section className="mx-auto max-w-[1200px] px-5 py-16 sm:px-8 sm:py-20 lg:px-12">
         <div className="animate-rise text-center">
-          <p className="mono text-[10px] uppercase tracking-[.22em] text-[#c9a15a]">From seed to cup</p>
-          <h2 className="serif mt-3 text-3xl text-[#f8ecd4] sm:text-4xl">A journey through time.</h2>
-          <p className="mx-auto mt-4 max-w-[560px] text-sm leading-[1.8] text-[#d8c2a0]">From a bicycle delivery round in 1950 to the café you're standing in today — the full legacy, in one frame.</p>
+          <p className="mono text-[10px] uppercase tracking-[.22em] text-[#b83a36]">From seed to cup</p>
+          <h2 className="serif mt-3 text-3xl text-[#67232d] sm:text-4xl">A journey through time.</h2>
+          <p className="mx-auto mt-4 max-w-[560px] text-sm leading-[1.8] text-[#775e53]">From a bicycle delivery round in 1950 to the café you're standing in today — the full legacy, in one frame.</p>
         </div>
-        <div className="animate-rise mt-10 overflow-hidden rounded-[1.5rem] border border-[#c9a15a]/25 shadow-[0_30px_80px_rgba(0,0,0,.45)]">
+        <div className="animate-rise mt-10 overflow-hidden rounded-[1.5rem] border border-[#e2d5c1] shadow-[0_30px_80px_rgba(0,0,0,.45)]">
           <img src={heritageTimeline} alt="The Gayathri Coffee legacy: a journey through time, from 1950 to MHC" className="w-full" loading="lazy" />
         </div>
       </section>
 
-      <section className="border-y border-[#c9a15a]/15 bg-[#150a02]">
+      <section className="border-y border-[#e2d5c1] bg-[#fdf8f1]">
         <div className="mx-auto grid max-w-[1200px] gap-6 px-5 py-16 sm:grid-cols-2 sm:px-8 sm:py-20 lg:px-12">
-          <div className="rounded-[1.5rem] border border-[#c9a15a]/20 bg-[#1a0e05] p-8">
-            <Coffee size={28} className="text-[#c9a15a]" strokeWidth={1.4} />
-            <h3 className="serif mt-4 text-2xl text-[#f8ecd4]">Sourced with care</h3>
-            <p className="mt-3 text-sm leading-[1.8] text-[#d8c2a0]">We celebrate this legacy by serving carefully selected Arabica and Robusta coffee beans sourced from the renowned plantations of Coorg and Chikkamagaluru.</p>
+          <div className="rounded-[1.5rem] border border-[#e2d5c1] bg-white p-8">
+            <Coffee size={28} className="text-[#b83a36]" strokeWidth={1.4} />
+            <h3 className="serif mt-4 text-2xl text-[#67232d]">Sourced with care</h3>
+            <p className="mt-3 text-sm leading-[1.8] text-[#775e53]">We celebrate this legacy by serving carefully selected Arabica and Robusta coffee beans sourced from the renowned plantations of Coorg and Chikkamagaluru.</p>
           </div>
-          <div className="rounded-[1.5rem] border border-[#c9a15a]/20 bg-[#1a0e05] p-8">
-            <Sparkles size={28} className="text-[#c9a15a]" strokeWidth={1.4} />
-            <h3 className="serif mt-4 text-2xl text-[#f8ecd4]">Traditionally brewed</h3>
-            <p className="mt-3 text-sm leading-[1.8] text-[#d8c2a0]">Every cup is freshly brewed using the traditional South Indian filter method, delivering a rich aroma, smooth texture, and bold flavor.</p>
+          <div className="rounded-[1.5rem] border border-[#e2d5c1] bg-white p-8">
+            <Sparkles size={28} className="text-[#b83a36]" strokeWidth={1.4} />
+            <h3 className="serif mt-4 text-2xl text-[#67232d]">Traditionally brewed</h3>
+            <p className="mt-3 text-sm leading-[1.8] text-[#775e53]">Every cup is freshly brewed using the traditional South Indian filter method, delivering a rich aroma, smooth texture, and bold flavor.</p>
           </div>
         </div>
       </section>
 
       <section id="bestsellers" className="mx-auto max-w-[1200px] px-5 py-16 sm:px-8 sm:py-20 lg:px-12">
         <div className="text-center">
-          <p className="mono text-[10px] uppercase tracking-[.22em] text-[#c9a15a]">The menu</p>
-          <h2 className="serif mt-3 text-3xl text-[#f8ecd4] sm:text-4xl">Our bestsellers</h2>
+          <p className="mono text-[10px] uppercase tracking-[.22em] text-[#b83a36]">The menu</p>
+          <h2 className="serif mt-3 text-3xl text-[#67232d] sm:text-4xl">Our bestsellers</h2>
         </div>
         <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {heritageBestsellers.map((item) => (
-            <div key={item.name} className="group rounded-[1.3rem] border border-[#c9a15a]/20 bg-[#150a02] p-6 transition-colors hover:border-[#c9a15a]/50">
-              <div className="grid size-11 place-items-center rounded-full bg-[#c9a15a]/10 text-[#c9a15a]"><Coffee size={20} /></div>
-              <h3 className="product-name mt-4 text-lg text-[#f8ecd4]">{item.name}</h3>
-              <p className="mt-2 text-xs leading-relaxed text-[#b39e7d]">{item.note}</p>
+            <div key={item.name} className="group rounded-[1.3rem] border border-[#e2d5c1] bg-white p-6 transition-colors hover:border-[#b83a36]/50">
+              <div className="grid size-11 place-items-center rounded-full bg-[#67232d]/10 text-[#b83a36]"><Coffee size={20} /></div>
+              <h3 className="product-name mt-4 text-lg text-[#67232d]">{item.name}</h3>
+              <p className="mt-2 text-xs leading-relaxed text-[#9a7564]">{item.note}</p>
             </div>
           ))}
         </div>
       </section>
 
-      <section className="border-y border-[#c9a15a]/15 bg-[#150a02]">
-        <div className="mx-auto max-w-[1200px] px-5 py-16 sm:px-8 sm:py-20 lg:px-12">
+      {SHOW_HERITAGE_GALLERY && (
+        <section id="gallery" className="mx-auto max-w-[1200px] px-5 py-16 sm:px-8 sm:py-20 lg:px-12">
           <div className="text-center">
-            <p className="mono text-[10px] uppercase tracking-[.22em] text-[#c9a15a]">What people say</p>
-            <h2 className="serif mt-3 text-3xl text-[#f8ecd4] sm:text-4xl">Loved by regulars.</h2>
+            <p className="mono text-[10px] uppercase tracking-[.22em] text-[#b83a36]">Gallery</p>
+            <h2 className="serif mt-3 text-3xl text-[#67232d] sm:text-4xl">A look inside MHC.</h2>
           </div>
-          <div className="mt-10 grid gap-5 sm:grid-cols-3">
-            {heritageTestimonials.map((testimonial) => (
-              <div key={testimonial.quote} className="rounded-[1.3rem] border border-[#c9a15a]/20 bg-[#1a0e05] p-6">
-                <div className="flex gap-1 text-[#c9a15a]">{[1, 2, 3, 4, 5].map((star) => <Star key={star} size={13} fill="currentColor" />)}</div>
-                <p className="mt-4 text-sm leading-[1.7] text-[#d8c2a0]">"{testimonial.quote}"</p>
-                <p className="mono mt-4 text-[10px] uppercase tracking-[.16em] text-[#b39e7d]">— {testimonial.author}</p>
-              </div>
-            ))}
+          <div className="relative mt-6 h-[420px] w-full sm:h-[520px]" data-testid="gallery-carousel">
+            <CircularCarousel
+              items={heritageGallery}
+              preset="cylinder"
+              intro="rise"
+              cardWidth={220}
+              aspectRatio={1}
+              speed={14}
+              captions={false}
+              gap={25}
+              tilt={-5}
+              curve={1}
+              perspective={2500}
+              autoplay="drift"
+              interval={3}
+              direction="left"
+              momentum={0.6}
+              snap
+              pauseOnHover
+              focusOnClick
+              draggable
+              parallax={0.3}
+              stretch={0.5}
+              fadeColor="#f8f1e8"
+              depthFade={0.55}
+              innerShade={0.6}
+              cornerRadius={12}
+            />
           </div>
-        </div>
-      </section>
+        </section>
+      )}
 
-      <section id="franchise" className="border-y border-[#c9a15a]/15 bg-[#150a02]">
+      <ReviewsSection reviews={heritageTestimonials} />
+
+      <section id="franchise" className="border-y border-[#e2d5c1] bg-[#fdf8f1]">
         <div className="mx-auto max-w-[1200px] px-5 py-16 sm:px-8 sm:py-20 lg:px-12">
           <div className="grid gap-12 lg:grid-cols-[1fr_1fr] lg:items-center">
             <div>
-              <p className="mono text-[10px] uppercase tracking-[.22em] text-[#c9a15a]">Franchise</p>
-              <h2 className="serif mt-4 text-3xl leading-tight text-[#f8ecd4] sm:text-4xl">Build a neighborhood coffee story.</h2>
-              <p className="mt-6 text-sm leading-[1.8] text-[#d8c2a0]">Our franchise model brings a warm and focused coffee-house experience to high-energy city neighborhoods and family-led markets.</p>
+              <p className="mono text-[10px] uppercase tracking-[.22em] text-[#b83a36]">Franchise</p>
+              <h2 className="serif mt-4 text-3xl leading-tight text-[#67232d] sm:text-4xl">Build a neighborhood coffee story.</h2>
+              <p className="mt-6 text-sm leading-[1.8] text-[#775e53]">Our franchise model brings a warm and focused coffee-house experience to high-energy city neighborhoods and family-led markets.</p>
               <div className="mt-8 flex flex-wrap gap-3">
-                <span className="rounded-full border border-[#c9a15a]/40 px-4 py-2 text-[11px] font-semibold uppercase tracking-[.12em] text-[#c9a15a]">Roast support</span>
-                <span className="rounded-full border border-[#c9a15a]/40 px-4 py-2 text-[11px] font-semibold uppercase tracking-[.12em] text-[#c9a15a]">Menu design</span>
-                <span className="rounded-full border border-[#c9a15a]/40 px-4 py-2 text-[11px] font-semibold uppercase tracking-[.12em] text-[#c9a15a]">Retail training</span>
+                <span className="rounded-full border border-[#b83a36]/40 px-4 py-2 text-[11px] font-semibold uppercase tracking-[.12em] text-[#b83a36]">Roast support</span>
+                <span className="rounded-full border border-[#b83a36]/40 px-4 py-2 text-[11px] font-semibold uppercase tracking-[.12em] text-[#b83a36]">Menu design</span>
+                <span className="rounded-full border border-[#b83a36]/40 px-4 py-2 text-[11px] font-semibold uppercase tracking-[.12em] text-[#b83a36]">Retail training</span>
               </div>
             </div>
-            <div className="rounded-[2rem] border border-[#c9a15a]/20 bg-[#1a0e05] p-8 sm:p-10">
+            <div className="rounded-[2rem] border border-[#e2d5c1] bg-white p-8 sm:p-10">
               <div className="grid gap-4">
-                <div className="flex items-center justify-between border-b border-[#c9a15a]/20 pb-4">
-                  <span className="text-sm font-semibold uppercase tracking-[.14em] text-[#f3e6cf]">Brand system</span>
-                  <Check size={18} className="text-[#c9a15a]" />
+                <div className="flex items-center justify-between border-b border-[#e2d5c1] pb-4">
+                  <span className="text-sm font-semibold uppercase tracking-[.14em] text-[#67232d]">Brand system</span>
+                  <Check size={18} className="text-[#b83a36]" />
                 </div>
-                <div className="flex items-center justify-between border-b border-[#c9a15a]/20 pb-4">
-                  <span className="text-sm font-semibold uppercase tracking-[.14em] text-[#f3e6cf]">Coffee operations</span>
-                  <Check size={18} className="text-[#c9a15a]" />
+                <div className="flex items-center justify-between border-b border-[#e2d5c1] pb-4">
+                  <span className="text-sm font-semibold uppercase tracking-[.14em] text-[#67232d]">Coffee operations</span>
+                  <Check size={18} className="text-[#b83a36]" />
                 </div>
-                <div className="flex items-center justify-between border-b border-[#c9a15a]/20 pb-4">
-                  <span className="text-sm font-semibold uppercase tracking-[.14em] text-[#f3e6cf]">Store growth</span>
-                  <Check size={18} className="text-[#c9a15a]" />
+                <div className="flex items-center justify-between border-b border-[#e2d5c1] pb-4">
+                  <span className="text-sm font-semibold uppercase tracking-[.14em] text-[#67232d]">Store growth</span>
+                  <Check size={18} className="text-[#b83a36]" />
                 </div>
-                <a href="#visit" className="mt-4 rounded-full bg-[#c9a15a] px-5 py-3 text-center text-xs font-semibold uppercase tracking-[.14em] text-[#241202] transition-colors hover:bg-[#d9b370]" data-testid="button-franchise-plan">Plan a franchise</a>
+                <a href="#visit" className="mt-4 rounded-full bg-[#67232d] px-5 py-3 text-center text-xs font-semibold uppercase tracking-[.14em] text-[#f9e7c5] transition-colors hover:bg-[#4a1820]" data-testid="button-franchise-plan">Plan a franchise</a>
               </div>
             </div>
           </div>
@@ -1211,24 +1448,22 @@ function MysoreHeritageLanding() {
       </section>
 
       <section id="visit" className="mx-auto max-w-[1200px] px-5 py-16 sm:px-8 sm:py-20 lg:px-12">
-        <div className="grid gap-8 rounded-[2rem] border border-[#c9a15a]/20 bg-[#150a02] p-8 sm:grid-cols-3 sm:p-12">
+        <div className="grid gap-8 rounded-[2rem] border border-[#e2d5c1] bg-white p-8 sm:grid-cols-2 sm:p-12">
           <div>
-            <MapPin size={22} className="text-[#c9a15a]" />
-            <p className="mt-3 text-sm leading-[1.7] text-[#d8c2a0]">#1066, Near Hotel Airlines, Jayalakshmi Vilas Road, Chamarajpurum (Lakshmipurum), Mysore – 570005</p>
+            <MapPin size={22} className="text-[#b83a36]" />
+            <p className="mt-3 text-sm leading-[1.7] text-[#775e53]">#1066, Near Hotel Airlines, Jayalakshmi Vilas Road, Chamarajpurum (Lakshmipurum), Mysore – 570005</p>
           </div>
           <div>
-            <Phone size={22} className="text-[#c9a15a]" />
-            <a href="tel:9606950300" className="mt-3 block text-sm text-[#d8c2a0] hover:text-[#c9a15a]">9606950300</a>
-          </div>
-          <div>
-            <Mail size={22} className="text-[#c9a15a]" />
-            <a href="mailto:reachus@gayathricoffee.com" className="mt-3 block text-sm text-[#d8c2a0] hover:text-[#c9a15a]">reachus@gayathricoffee.com</a>
+            <Phone size={22} className="text-[#b83a36]" />
+            <a href="tel:9606950300" className="mt-3 block text-sm text-[#775e53] hover:text-[#b83a36]">9606950300</a>
           </div>
         </div>
       </section>
 
-      <footer className="border-t border-[#c9a15a]/15 py-8 text-center">
-        <p className="mono text-[10px] uppercase tracking-[.2em] text-[#8a765a]">MHC · Taste of Heritage</p>
+      <footer className="border-t border-[#e2d5c1] py-8 text-center">
+        <p className="mono text-[10px] uppercase tracking-[.2em] text-[#9a7564]">MHC · Taste of Heritage</p>
+        <a href={MHC_INSTAGRAM_URL} target="_blank" rel="noreferrer" className="mt-4 inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[.12em] text-[#b83a36]" data-testid="link-mhc-instagram"><Instagram size={16} /> Follow MHC on Instagram</a>
+        <div><DesignCredit /></div>
       </footer>
     </div>
   );
@@ -1241,25 +1476,31 @@ function BrandToggle({
   isHeritage: boolean;
   onToggle: (originX: string, originY: string) => void;
 }) {
+  // Two equal-width segments with a sliding thumb, so the thumb always sits exactly under the active label.
+  const segment = (active: boolean, target: 'gayathri' | 'heritage') => `relative z-10 flex h-9 w-[104px] items-center justify-center gap-2 rounded-full px-3 text-[10px] font-semibold uppercase tracking-[.08em] whitespace-nowrap transition-colors duration-300 sm:w-[112px] ${active ? (target === 'gayathri' ? 'text-white' : 'text-[#3a161e]') : 'text-[#9a7564] hover:text-[#67232d]'}`;
+  const pick = (target: 'gayathri' | 'heritage') => (event: React.MouseEvent<HTMLButtonElement>) => {
+    if ((target === 'heritage') === isHeritage) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    onToggle(`${rect.left + rect.width / 2}px`, `${rect.top + rect.height / 2}px`);
+  };
   return (
-    <button
-      type="button"
-      onClick={(event) => {
-        const rect = event.currentTarget.getBoundingClientRect();
-        onToggle(`${rect.left + rect.width / 2}px`, `${rect.top + rect.height / 2}px`);
-      }}
-      aria-label={`Switch to ${isHeritage ? 'Gayathri Coffee' : 'MHC'}`}
+    <div
+      role="group"
+      aria-label="Switch brand"
       data-testid="button-brand-toggle"
-      className={`fixed bottom-5 left-4 z-[150] flex items-center rounded-full border p-1 shadow-[0_10px_30px_rgba(0,0,0,.25)] backdrop-blur-md transition-colors duration-500 sm:bottom-6 sm:left-6 ${isHeritage ? 'border-[#c9a15a]/40 bg-[#1a0e05]/95' : 'border-[#e2d5c1] bg-white/95'}`}
+      className="fixed bottom-5 left-4 z-[150] grid grid-cols-2 items-center rounded-full border border-[#e2d5c1] bg-white/95 p-1 shadow-[0_10px_30px_rgba(86,27,35,.18)] backdrop-blur-md sm:bottom-6 sm:left-6"
     >
-      <span className={`absolute inset-y-1 w-[calc(50%-2px)] rounded-full transition-all duration-500 ${isHeritage ? 'left-[calc(50%+1px)] bg-gradient-to-r from-[#c9a15a] to-[#e0b872]' : 'left-1 bg-[#67232d]'}`} />
-      <span className={`relative z-10 flex items-center gap-1.5 rounded-full py-1.5 pl-1.5 pr-3 text-[9px] font-semibold uppercase tracking-wide transition-colors sm:text-[10px] ${!isHeritage ? 'text-white' : 'text-[#d8c2a0]/70'}`}>
-        <img src={logoPath} alt="" className="size-5 rounded-full bg-white object-contain p-0.5" /> Gayathri
-      </span>
-      <span className={`relative z-10 flex items-center gap-1.5 rounded-full py-1.5 pl-3 pr-1.5 text-[9px] font-semibold uppercase tracking-wide transition-colors sm:text-[10px] ${isHeritage ? 'text-[#241202]' : 'text-[#9a7564]'}`}>
-        MHC <img src={heritageLogo} alt="" className="size-5 rounded-full object-cover" />
-      </span>
-    </button>
+      <span
+        aria-hidden="true"
+        className={`absolute inset-y-1 left-1 w-[calc(50%-4px)] rounded-full transition-[transform,background-color] duration-500 ease-[cubic-bezier(.65,0,.35,1)] ${isHeritage ? 'translate-x-full bg-gradient-to-r from-[#c9a15a] to-[#e0b872]' : 'translate-x-0 bg-[#67232d]'}`}
+      />
+      <button type="button" aria-pressed={!isHeritage} onClick={pick('gayathri')} className={segment(!isHeritage, 'gayathri')}>
+        <img src={logoPath} alt="" className="size-5 shrink-0 rounded-full bg-white object-contain p-0.5" /> Gayathri
+      </button>
+      <button type="button" aria-pressed={isHeritage} onClick={pick('heritage')} className={segment(isHeritage, 'heritage')}>
+        <img src={heritageLogo} alt="" className="size-5 shrink-0 rounded-full object-cover" /> MHC
+      </button>
+    </div>
   );
 }
 
@@ -1267,14 +1508,14 @@ function BrandExperience() {
   const [brand, setBrand] = useState<'gayathri' | 'heritage'>('gayathri');
   const [phase, setPhase] = useState<'idle' | 'in' | 'out'>('idle');
   const [origin, setOrigin] = useState({ x: '100%', y: '0%' });
-  const [overlayColor, setOverlayColor] = useState('#1a0e05');
+  const [overlayColor, setOverlayColor] = useState('#f8f1e8');
   const isHeritage = brand === 'heritage';
 
   const handleToggle = (originX: string, originY: string) => {
     if (phase !== 'idle') return;
     setOrigin({ x: originX, y: originY });
     const next = isHeritage ? 'gayathri' : 'heritage';
-    setOverlayColor(next === 'heritage' ? '#1a0e05' : '#f8f1e8');
+    setOverlayColor(next === 'heritage' ? '#f8f1e8' : '#f8f1e8');
     setPhase('in');
     window.setTimeout(() => {
       setBrand(next);
@@ -1302,9 +1543,10 @@ function BrandExperience() {
   );
 }
 
-type CoffeeTypeOption = 'Arabica' | 'Robusta' | 'Peaberry' | 'Mysore Nuggets';
-const coffeeTypeOptions: CoffeeTypeOption[] = ['Arabica', 'Robusta', 'Peaberry', 'Mysore Nuggets'];
-const coffeeTypePricePerKg: Record<CoffeeTypeOption, number> = { Arabica: 420, Robusta: 285, Peaberry: 315, 'Mysore Nuggets': 460 };
+type CoffeeTypeOption = 'Arabica' | 'Robusta' | 'Peaberry' | 'Pure-A' | 'Mysore Nuggets';
+const coffeeTypeOptions: CoffeeTypeOption[] = ['Arabica', 'Robusta', 'Peaberry', 'Pure-A', 'Mysore Nuggets'];
+// ₹ per kg, matching the Pure Coffee price list (Arabica AA, Robusta AA, Pure-PB, Pure-A, Mysore Nuggets).
+const coffeeTypePricePerKg: Record<CoffeeTypeOption, number> = { Arabica: 1200, Robusta: 1000, Peaberry: 980, 'Pure-A': 980, 'Mysore Nuggets': 1160 };
 const chicoryPricePerKg = 90;
 
 type GrindOption = 'Coarse' | 'Medium' | 'Fine' | 'Roasted Beans';
@@ -1342,7 +1584,8 @@ const grindGuide: Record<GrindOption, { note: string; methods: { label: string; 
 
 function CustomRoastPage() {
   const [, navigate] = useLocation();
-  const { setCart } = useCart();
+  const { cart, setCart } = useCart();
+  const [cartOpen, setCartOpen] = useState(false);
   const [type1, setType1] = useState<CoffeeTypeOption>('Arabica');
   const [type2, setType2] = useState<CoffeeTypeOption>('Robusta');
   const [blend1, setBlend1] = useState(80);
@@ -1420,11 +1663,27 @@ function CustomRoastPage() {
       (blend3 / 100) * chicoryPricePerKg,
   );
 
+  const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
+
+  const changeQuantity = (id: string, delta: number) => {
+    setCart((current) => current.flatMap((item) => {
+      if (item.product.id !== id) return [item];
+      const quantity = item.quantity + delta;
+      return quantity > 0 ? [{ ...item, quantity }] : [];
+    }));
+  };
+
+  // Keep the page from scrolling behind the open basket, like the main shop does.
+  useEffect(() => {
+    document.body.style.overflow = cartOpen ? 'hidden' : '';
+    return () => { document.body.style.overflow = ''; };
+  }, [cartOpen]);
+
   const handleAddToCart = () => {
     const id = `custom-${type1}-${type2}-${blend1}-${blend3}-${grind}`.toLowerCase().replace(/\s+/g, '-');
     const product: Product = {
       id,
-      name: `Custom Blend · ${blend1}% ${type1} / ${blend2}% ${type2}`,
+      name: `Custom Blend · ${blend1}% ${type1} / ${blend2}% ${type2}${blend3 > 0 ? ` / ${blend3}% Chicory` : ''} · ${grind === 'Roasted Beans' ? grind : `${grind} grind`} · 1 kg`,
       shortName: 'Custom Blend',
       description: `${blend3}% chicory · ${grind} grind`,
       price: totalPrice,
@@ -1453,7 +1712,16 @@ function CustomRoastPage() {
             <ArrowRight size={14} className="rotate-180" /> Back to shop
           </button>
           <img src={logoPath} alt="Gayathri Coffee" className="h-10 w-auto object-contain" />
-          <div className="w-[92px]" />
+          <button
+            type="button"
+            onClick={() => setCartOpen(true)}
+            className="relative grid size-10 place-items-center rounded-full bg-[#c9a15a] text-[#67232d]"
+            aria-label={`Open basket with ${cartCount} item${cartCount === 1 ? '' : 's'}`}
+            data-testid="button-cart"
+          >
+            <ShoppingBag size={18} />
+            <span className="absolute -right-1 -top-1 grid size-5 place-items-center rounded-full bg-[#b83a36] text-[10px] font-bold text-[#fdf8f1]" data-testid="text-cart-count">{cartCount}</span>
+          </button>
         </div>
       </header>
 
@@ -1470,12 +1738,12 @@ function CustomRoastPage() {
               <div className="rounded-[1.5rem] border border-[#decdb9] bg-white p-6">
                 <p className="mono text-[10px] uppercase tracking-[.18em] text-[#9a7564]">Coffee Type 1</p>
                 <div className="mt-4 grid grid-cols-2 gap-2">
-                  {coffeeTypeOptions.map((option) => (
+                  {coffeeTypeOptions.map((option, optionIndex) => (
                     <button
                       key={option}
                       type="button"
                       onClick={() => { setType1(option); bump(); }}
-                      className={`rounded-xl border px-3 py-2.5 text-xs font-semibold transition-colors ${type1 === option ? 'border-[#67232d] bg-[#67232d] text-[#f9e7c5]' : 'border-[#decdb9] text-[#775e53] hover:border-[#c9a15a]'}`}
+                      className={`${optionIndex === coffeeTypeOptions.length - 1 && coffeeTypeOptions.length % 2 === 1 ? 'col-span-2 ' : ''}rounded-xl border px-3 py-2.5 text-xs font-semibold transition-colors ${type1 === option ? 'border-[#67232d] bg-[#67232d] text-[#f9e7c5]' : 'border-[#decdb9] text-[#775e53] hover:border-[#c9a15a]'}`}
                       data-testid={`button-type1-${option.toLowerCase().replace(' ', '-')}`}
                     >
                       {option}
@@ -1486,12 +1754,12 @@ function CustomRoastPage() {
               <div className="rounded-[1.5rem] border border-[#decdb9] bg-white p-6">
                 <p className="mono text-[10px] uppercase tracking-[.18em] text-[#9a7564]">Coffee Type 2</p>
                 <div className="mt-4 grid grid-cols-2 gap-2">
-                  {coffeeTypeOptions.map((option) => (
+                  {coffeeTypeOptions.map((option, optionIndex) => (
                     <button
                       key={option}
                       type="button"
                       onClick={() => { setType2(option); bump(); }}
-                      className={`rounded-xl border px-3 py-2.5 text-xs font-semibold transition-colors ${type2 === option ? 'border-[#67232d] bg-[#67232d] text-[#f9e7c5]' : 'border-[#decdb9] text-[#775e53] hover:border-[#c9a15a]'}`}
+                      className={`${optionIndex === coffeeTypeOptions.length - 1 && coffeeTypeOptions.length % 2 === 1 ? 'col-span-2 ' : ''}rounded-xl border px-3 py-2.5 text-xs font-semibold transition-colors ${type2 === option ? 'border-[#67232d] bg-[#67232d] text-[#f9e7c5]' : 'border-[#decdb9] text-[#775e53] hover:border-[#c9a15a]'}`}
                       data-testid={`button-type2-${option.toLowerCase().replace(' ', '-')}`}
                     >
                       {option}
@@ -1650,16 +1918,38 @@ function CustomRoastPage() {
               >
                 {added ? <>Added to cart <Check size={16} /></> : <>Add to cart <ShoppingBag size={16} /></>}
               </button>
+              {cartCount > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => setCartOpen(true)}
+                  className="mt-3 flex w-full items-center justify-center gap-2 rounded-full border border-[#67232d] px-5 py-3.5 text-sm font-semibold uppercase tracking-[.12em] text-[#67232d] transition-colors hover:bg-[#67232d] hover:text-[#f9e7c5]"
+                  data-testid="button-view-cart"
+                >
+                  View cart ({cartCount}) <ShoppingBag size={16} />
+                </button>
+              ) : null}
             </div>
           </div>
         </div>
       </section>
+      {createPortal(
+        <CartDrawer
+          items={cart}
+          open={cartOpen}
+          onClose={() => setCartOpen(false)}
+          onChange={changeQuantity}
+          onRemove={(id) => setCart((current) => current.filter((item) => item.product.id !== id))}
+          onCheckout={() => { setCartOpen(false); navigate('/checkout'); }}
+        />,
+        document.body,
+      )}
     </div>
   );
 }
 
-type ShippingMethod = 'shiprocket' | 'india_post';
-const SHIPROCKET_ESTIMATE_FEE = 49;
+type ShippingMethod = 'india_post';
+// No extra packaging charge is added to orders any more (kept at 0 so older code paths still work).
+const PACKAGING_FEE = 0;
 
 function lookupIndiaPostFee(totalWeightGrams: number, table: { weightGrams: number; price: number }[]): number {
   if (table.length === 0) return 60;
@@ -1679,6 +1969,7 @@ declare global {
       currency: string;
       name: string;
       order_id: string;
+      description?: string;
       prefill: { name: string; contact: string; email: string };
       theme: { color: string };
       handler: (response: RazorpayHandlerResponse) => void;
@@ -1714,7 +2005,7 @@ function CheckoutPage() {
   const [billingState, setBillingState] = useState('');
   const [billingPincode, setBillingPincode] = useState('');
   const [notes, setNotes] = useState('');
-  const [shippingMethod, setShippingMethod] = useState<ShippingMethod>('shiprocket');
+  const shippingMethod: ShippingMethod = 'india_post';
   // No COD — every order pays online through Razorpay.
   const payment = 'Online';
   const [placed, setPlaced] = useState(false);
@@ -1743,14 +2034,8 @@ function CheckoutPage() {
   });
   const indiaPostFee = liveIndiaPostRate?.amount ?? lookupIndiaPostFee(totalWeightGrams, indiaPostRateTable);
 
-  const shiprocketRateParams = { pincode: pincode.trim(), weightGrams: totalWeightGrams, cod: false };
-  const { data: liveShiprocketRate, isFetching: shiprocketRateLoading } = useGetShiprocketRate(shiprocketRateParams, {
-    query: { enabled: pincodeValid && totalWeightGrams > 0, queryKey: getGetShiprocketRateQueryKey(shiprocketRateParams) },
-  });
-  const shiprocketFee = liveShiprocketRate?.amount ?? SHIPROCKET_ESTIMATE_FEE;
-
-  const deliveryFee = shippingMethod === 'india_post' ? indiaPostFee : shiprocketFee;
-  const total = subtotal + deliveryFee;
+  const deliveryFee = indiaPostFee;
+  const total = subtotal + deliveryFee + PACKAGING_FEE;
 
   const createOrder = useCreateOrder({
     mutation: {
@@ -1764,7 +2049,6 @@ function CheckoutPage() {
       onError: (err) => setPlaceError(err instanceof Error ? err.message : 'Could not place your order. Please try again.'),
     },
   });
-
   const buildOrderPayload = (verification?: { razorpayOrderId: string; razorpayPaymentId: string; razorpaySignature: string }) => ({
     customerName: fullName.trim(),
     phone: phone.trim(),
@@ -1781,6 +2065,7 @@ function CheckoutPage() {
     subtotal,
     shippingMethod,
     shippingFee: deliveryFee,
+    packagingFee: PACKAGING_FEE,
     total,
     paymentMethod: payment,
     ...verification,
@@ -1825,23 +2110,32 @@ function CheckoutPage() {
         setPlaceError('Could not load the payment gateway. Please try again.');
         return;
       }
-      const { razorpayOrderId } = await createRazorpayOrder.mutateAsync({ data: { amount: total } });
+      // The whole checkout is saved on the server before payment, so even if this browser closes
+      // mid-payment the order is still created when Razorpay confirms the money.
+      const { razorpayOrderId, orderNumber } = await createRazorpayOrder.mutateAsync({ data: { amount: total, checkout: buildOrderPayload() } });
       const rzp = new window.Razorpay({
         key: paymentSettings.keyId,
         amount: Math.round(total * 100),
         currency: 'INR',
         name: 'Gayathri Coffee',
         order_id: razorpayOrderId,
+        description: orderNumber ? `Order ${orderNumber}` : undefined,
         prefill: { name: fullName.trim(), contact: phone.trim(), email: email.trim() },
         theme: { color: '#67232d' },
         handler: (response) => {
-          createOrder.mutate({
-            data: buildOrderPayload({
-              razorpayOrderId: response.razorpay_order_id,
-              razorpayPaymentId: response.razorpay_payment_id,
-              razorpaySignature: response.razorpay_signature,
-            }),
-          });
+          createOrder.mutate(
+            {
+              data: buildOrderPayload({
+                razorpayOrderId: response.razorpay_order_id,
+                razorpayPaymentId: response.razorpay_payment_id,
+                razorpaySignature: response.razorpay_signature,
+              }),
+            },
+            {
+              // The money has already been taken - the server creates the order from Razorpay's confirmation too.
+              onError: () => setPlaceError('Your payment was received. We are confirming your order and will message you shortly - please do not pay again.'),
+            },
+          );
         },
         modal: { ondismiss: () => setPlaceError('Payment was cancelled.') },
       });
@@ -1873,10 +2167,10 @@ function CheckoutPage() {
           <p className="mt-3 text-sm leading-[1.7] text-[#775e53]">Thank you, {customerName.split(' ')[0]}. Your coffee is being roasted and packed.</p>
           <div className="mt-6 rounded-[1.5rem] border border-[#decdb9] bg-white p-6 text-left">
             <div className="flex justify-between text-sm"><span className="text-[#775e53]">Order ID</span><span className="mono font-semibold text-[#67232d]">{orderId}</span></div>
-            <div className="mt-2 flex justify-between text-sm"><span className="text-[#775e53]">Shipping via</span><span className="font-medium text-[#67232d]">{shippingMethod === 'shiprocket' ? 'Shiprocket' : 'India Post'}</span></div>
+            <div className="mt-2 flex justify-between text-sm"><span className="text-[#775e53]">Delivery</span><span className="font-medium text-[#67232d]">Standard delivery</span></div>
             <div className="mt-2 flex justify-between text-sm"><span className="text-[#775e53]">Payment</span><span className="font-medium text-[#67232d]">{payment}</span></div>
             <div className="mt-2 flex justify-between text-sm"><span className="text-[#775e53]">Total paid</span><span className="mono font-semibold text-[#67232d]">{formatPrice(orderTotal)}</span></div>
-            <div className="mt-2 flex justify-between text-sm"><span className="text-[#775e53]">Estimated delivery</span><span className="font-medium text-[#67232d]">{shippingMethod === 'shiprocket' ? '2-4 business days' : '5-8 business days'}</span></div>
+            <div className="mt-2 flex justify-between text-sm"><span className="text-[#775e53]">Estimated delivery</span><span className="font-medium text-[#67232d]">5-8 business days</span></div>
           </div>
           <button type="button" onClick={() => navigate('/')} className="mt-8 w-full rounded-full bg-[#67232d] px-6 py-4 text-sm font-semibold uppercase tracking-[.12em] text-[#f9e7c5]" data-testid="button-continue-shopping">Continue shopping</button>
         </div>
@@ -1983,33 +2277,18 @@ function CheckoutPage() {
 
             <div className="rounded-[1.5rem] border border-[#decdb9] bg-white p-6 sm:p-8">
               <p className="mono text-[10px] uppercase tracking-[.18em] text-[#9a7564]">Shipping method</p>
-              <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                <button
-                  type="button"
-                  onClick={() => setShippingMethod('shiprocket')}
-                  className={`rounded-xl border px-4 py-4 text-left transition-colors ${shippingMethod === 'shiprocket' ? 'border-[#67232d] bg-[#67232d] text-[#f9e7c5]' : 'border-[#decdb9] text-[#775e53] hover:border-[#c9a15a]'}`}
-                  data-testid="button-shipping-shiprocket"
-                >
-                  <span className="block text-sm font-semibold">Shiprocket</span>
-                  <span className={`mt-1 block text-xs ${shippingMethod === 'shiprocket' ? 'text-[#d9bfa9]' : 'text-[#9a7564]'}`}>Standard courier · 2-4 business days</span>
-                  <span className="mono mt-2 block text-sm">
-                    {pincodeValid && shiprocketRateLoading ? 'Calculating…' : formatPrice(shiprocketFee)}
-                  </span>
-                  {!pincodeValid ? <span className={`mt-1 block text-[10px] ${shippingMethod === 'shiprocket' ? 'text-[#d9bfa9]/70' : 'text-[#9a7564]/80'}`}>Enter your pincode above for an exact rate</span> : null}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShippingMethod('india_post')}
-                  className={`rounded-xl border px-4 py-4 text-left transition-colors ${shippingMethod === 'india_post' ? 'border-[#67232d] bg-[#67232d] text-[#f9e7c5]' : 'border-[#decdb9] text-[#775e53] hover:border-[#c9a15a]'}`}
+              <div className="mt-4">
+                <div
+                  className="rounded-xl border border-[#67232d] bg-[#67232d] px-4 py-4 text-left text-[#f9e7c5]"
                   data-testid="button-shipping-india-post"
                 >
-                  <span className="block text-sm font-semibold">India Post</span>
-                  <span className={`mt-1 block text-xs ${shippingMethod === 'india_post' ? 'text-[#d9bfa9]' : 'text-[#9a7564]'}`}>Speed Post · 5-8 business days</span>
+                  <span className="block text-sm font-semibold">Standard delivery</span>
+                  <span className="mt-1 block text-xs text-[#d9bfa9]">Regular post · 5-8 business days</span>
                   <span className="mono mt-2 block text-sm">
                     {pincodeValid && indiaPostRateLoading ? 'Calculating…' : formatPrice(indiaPostFee)}
                   </span>
-                  {!pincodeValid ? <span className={`mt-1 block text-[10px] ${shippingMethod === 'india_post' ? 'text-[#d9bfa9]/70' : 'text-[#9a7564]/80'}`}>Enter your pincode above for an exact rate</span> : null}
-                </button>
+                  {!pincodeValid ? <span className="mt-1 block text-[10px] text-[#d9bfa9]/70">Enter your pincode above for an exact rate</span> : null}
+                </div>
               </div>
             </div>
 
@@ -2018,7 +2297,7 @@ function CheckoutPage() {
               <div className="mt-4 space-y-4">
                 {cart.map(({ product, quantity }) => (
                   <div key={product.id} className="flex items-center gap-3">
-                    <div className="grid size-14 shrink-0 place-items-center rounded-xl border border-[#decdb9] bg-[#fdf8f1] p-1"><img src={product.image} alt="" className="max-h-full max-w-full object-contain" /></div>
+                    <div className="grid size-14 shrink-0 place-items-center rounded-xl border border-[#decdb9] bg-[#fdf8f1] p-1"><ProductImage product={product} imgClassName="max-h-full max-w-full object-contain" tileClassName="h-full w-full" small /></div>
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-semibold text-[#67232d]">{product.name}</p>
                       <p className="text-xs text-[#9a7564]">Qty {quantity}</p>
@@ -2036,6 +2315,7 @@ function CheckoutPage() {
               <div className="mt-5 space-y-3 text-sm">
                 <div className="flex justify-between"><span className="text-[#d9bfa9]">Subtotal</span><span className="mono">{formatPrice(subtotal)}</span></div>
                 <div className="flex justify-between"><span className="text-[#d9bfa9]">Delivery</span><span className="mono">{deliveryFee === 0 ? 'Free' : formatPrice(deliveryFee)}</span></div>
+                {PACKAGING_FEE > 0 ? <div className="flex justify-between"><span className="text-[#d9bfa9]">Packaging</span><span className="mono">{formatPrice(PACKAGING_FEE)}</span></div> : null}
               </div>
               <p className="mt-3 text-[10px] text-[#d9bfa9]/70">Hand-roasted in Mysore and shipped across India — delivery is calculated above based on your pincode.</p>
               <div className="mt-5 flex items-center justify-between border-t border-[#f9e7c5]/20 pt-5">
@@ -2135,7 +2415,7 @@ function PrivacyPolicyPage() {
               WhatsApp Business Data Processing Terms
             </a>.
           </p>
-          <p>If you&apos;d rather not receive order updates over WhatsApp, email us at the address below and we&apos;ll note that on your account.</p>
+          <p>If you&apos;d rather not receive order updates over WhatsApp, contact us by phone and we&apos;ll note that on your account.</p>
         </Section>
 
         <Section title="4. Payments">
@@ -2148,8 +2428,8 @@ function PrivacyPolicyPage() {
 
         <Section title="5. Shipping partners">
           <p>
-            To deliver your order, we share your name, phone number, and delivery address with our shipping partners — Shiprocket and
-            India Post — solely for the purpose of dispatching and delivering your package.
+            To deliver your order, we share your name, phone number, and delivery address with India Post solely for the purpose of
+            dispatching and delivering your package.
           </p>
         </Section>
 
@@ -2191,8 +2471,7 @@ function PrivacyPolicyPage() {
             Gayathri Coffee Works<br />
             33B, Belavadi Industrial Area, Yalawala Hobli, Mysore<br />
             No 7, Duplin Complex, Shivarampet, Mysore — 570001, Karnataka, India<br />
-            Phone: 0821 2420328, +91-9141737288<br />
-            Email: <a href="mailto:hello@gayathricoffee.in" className="text-[#b83a36] underline">hello@gayathricoffee.in</a>
+            Phone: 0821 2420328, +91-9141737288
           </p>
         </Section>
       </section>

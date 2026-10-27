@@ -10,6 +10,7 @@ import type { OrderItemOutput } from './orderItemOutput';
 export interface OrderWithItems {
   id: string;
   orderNumber: string;
+  invoiceNumber?: string | null;
   customerName: string;
   phone: string;
   email?: string | null;
@@ -25,12 +26,18 @@ export interface OrderWithItems {
   subtotal: number;
   shippingMethod: string;
   shippingFee: number;
+  packagingFee?: number;
+  source?: string;
   total: number;
   paymentMethod: string;
   paymentStatus: string;
   status: string;
   trackingNumber?: string | null;
   trackingUrl?: string | null;
+  courierName?: string | null;
+  shiprocketShipmentId?: string | null;
+  pickupScheduledFor?: string | null;
+  razorpayPaymentId?: string | null;
   createdAt: string;
   items: OrderItemOutput[];
 }

@@ -965,6 +965,8 @@ components:
           enum: [shiprocket, india_post]
         shippingFee:
           type: integer
+        packagingFee:
+          type: integer
         total:
           type: integer
         paymentMethod:
@@ -1018,6 +1020,9 @@ components:
           type: string
         orderNumber:
           type: string
+        invoiceNumber:
+          type: string
+          nullable: true
         customerName:
           type: string
         phone:
@@ -1055,6 +1060,10 @@ components:
           type: string
         shippingFee:
           type: integer
+        packagingFee:
+          type: integer
+        source:
+          type: string
         total:
           type: integer
         paymentMethod:
@@ -1067,6 +1076,18 @@ components:
           type: string
           nullable: true
         trackingUrl:
+          type: string
+          nullable: true
+        courierName:
+          type: string
+          nullable: true
+        shiprocketShipmentId:
+          type: string
+          nullable: true
+        pickupScheduledFor:
+          type: string
+          nullable: true
+        razorpayPaymentId:
           type: string
           nullable: true
         createdAt:
@@ -1120,6 +1141,9 @@ components:
         amount:
           type: integer
           description: Rupees (not paise)
+        checkout:
+          $ref: "#/components/schemas/OrderInput"
+          description: The full checkout, saved server-side before payment so a paid order can always be rebuilt
       required:
         - amount
     RazorpayOrderResponse:
@@ -1127,6 +1151,9 @@ components:
       properties:
         razorpayOrderId:
           type: string
+        orderNumber:
+          type: string
+          description: Order number reserved for this checkout; shown in Razorpay
       required:
         - razorpayOrderId
     AdminStatsKpi:

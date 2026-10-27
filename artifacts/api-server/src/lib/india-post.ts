@@ -87,3 +87,9 @@ export async function getIndiaPostTariff(input: IndiaPostRateInput): Promise<{ a
 
   return { amount: Math.round(data.final_amount), chargeableWeight: data.chargeable_weight };
 }
+
+// India Post's official article-tracking page. The tracking number is part of the link, so the customer
+// lands straight on their parcel instead of an empty search form.
+export function indiaPostTrackingUrl(trackingNumber: string): string {
+  return `https://www.indiapost.gov.in/track-result/article-number/${encodeURIComponent(trackingNumber.trim())}`;
+}

@@ -199,6 +199,7 @@ export interface OrderInput {
   subtotal: number;
   shippingMethod: OrderInputShippingMethod;
   shippingFee: number;
+  packagingFee?: number;
   total: number;
   paymentMethod: string;
   /** Present when paid via Razorpay; verified server-side before the order is created */
@@ -219,6 +220,7 @@ export interface OrderItemOutput {
 export interface OrderWithItems {
   id: string;
   orderNumber: string;
+  invoiceNumber?: string | null;
   customerName: string;
   phone: string;
   email?: string | null;
@@ -234,12 +236,18 @@ export interface OrderWithItems {
   subtotal: number;
   shippingMethod: string;
   shippingFee: number;
+  packagingFee?: number;
+  source?: string;
   total: number;
   paymentMethod: string;
   paymentStatus: string;
   status: string;
   trackingNumber?: string | null;
   trackingUrl?: string | null;
+  courierName?: string | null;
+  shiprocketShipmentId?: string | null;
+  pickupScheduledFor?: string | null;
+  razorpayPaymentId?: string | null;
   createdAt: string;
   items: OrderItemOutput[];
 }
@@ -258,10 +266,14 @@ export interface PaymentSettings {
 export interface RazorpayOrderRequest {
   /** Rupees (not paise) */
   amount: number;
+  /** The full checkout, saved server-side before payment so a paid order can always be rebuilt */
+  checkout?: OrderInput;
 }
 
 export interface RazorpayOrderResponse {
   razorpayOrderId: string;
+  /** Order number reserved for this checkout; shown in Razorpay */
+  orderNumber?: string;
 }
 
 export interface AdminStatsKpi {

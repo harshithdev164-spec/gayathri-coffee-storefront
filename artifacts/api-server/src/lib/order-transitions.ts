@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { db, ordersTable, type Order } from "@workspace/db";
 import { sendShippingUpdateEmail } from "./email";
+import { sendNotifications } from "./notify";
 import { sendOrderShippedWhatsApp, sendAdminOrderShippedAlert, sendAdminOrderCancelledAlert } from "./whatsapp";
 
 type OrderPatch = {
@@ -21,13 +22,15 @@ export async function updateOrderStatus(existing: Order, patch: OrderPatch): Pro
   }
 
   if (order.status === "shipped" && existing.status !== "shipped") {
-    void sendShippingUpdateEmail(order);
-    void sendOrderShippedWhatsApp(order);
-    void sendAdminOrderShippedAlert(order);
+    await sendNotifications(`order ${order.orderNumber} shipped`, [
+      sendShippingUpdateEmail(order),
+      sendOrderShippedWhatsApp(order),
+      sendAdminOrderShippedAlert(order),
+    ]);
   }
 
   if (order.status === "cancelled" && existing.status !== "cancelled") {
-    void sendAdminOrderCancelledAlert(order);
+    await sendNotifications(`order ${order.orderNumber} cancelled`, [sendAdminOrderCancelledAlert(order)]);
   }
 
   return order;

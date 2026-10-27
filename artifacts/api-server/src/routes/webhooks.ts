@@ -1,9 +1,11 @@
 import { Router, type IRouter } from "express";
 import crypto from "node:crypto";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db, ordersTable, whatsappEventsTable } from "@workspace/db";
 import { updateOrderStatus, isForwardStatusTransition } from "../lib/order-transitions";
 import { logger } from "../lib/logger";
+import { handleInboundMessage } from "../lib/whatsapp-bot";
+import { createOrderFromPendingCheckout } from "../lib/order-create";
 
 const router: IRouter = Router();
 
@@ -44,16 +46,41 @@ router.post("/webhooks/razorpay", async (req, res) => {
 
   const [order] = await db.select().from(ordersTable).where(eq(ordersTable.razorpayOrderId, razorpayOrderId)).limit(1);
   if (!order) {
-    logger.warn({ razorpayOrderId, event }, "Razorpay webhook: no matching order");
+    // The customer paid but their browser never created the order (closed tab, network drop).
+    // Rebuild it from the checkout we saved before payment — the order is auto-accepted as paid.
+    if ((event === "payment.captured" || event === "order.paid") && payment?.id) {
+      try {
+        const created = await createOrderFromPendingCheckout(razorpayOrderId, payment.id);
+        if (created) {
+          logger.info({ razorpayOrderId, orderNumber: created.order.orderNumber }, "Razorpay webhook: created the missing order");
+        } else {
+          logger.error({ razorpayOrderId, paymentId: payment.id }, "Razorpay webhook: PAID but no saved checkout — add this order by hand");
+          res.status(500).json({ error: "No saved checkout for this payment" });
+          return;
+        }
+      } catch (err) {
+        logger.error({ err, razorpayOrderId }, "Razorpay webhook: could not create the missing order");
+        // 500 makes Razorpay retry the webhook, which gives the order another chance to be created.
+        res.status(500).json({ error: "Could not create the order" });
+        return;
+      }
+    } else {
+      logger.warn({ razorpayOrderId, event }, "Razorpay webhook: no matching order");
+    }
     res.json({ ok: true });
     return;
   }
 
   if ((event === "payment.captured" || event === "order.paid") && order.paymentStatus !== "paid") {
-    await db
-      .update(ordersTable)
-      .set({ paymentStatus: "paid", razorpayPaymentId: payment?.id ?? order.razorpayPaymentId })
-      .where(eq(ordersTable.id, order.id));
+    // A payment confirmed asynchronously (rather than verified synchronously at
+    // checkout) should also advance a still-"pending" order the same way —
+    // the forward-transition guard keeps this a no-op for anything further along.
+    const statusPatch = isForwardStatusTransition(order.status, "confirmed") ? { status: "confirmed" } : {};
+    await updateOrderStatus(order, {
+      paymentStatus: "paid",
+      razorpayPaymentId: payment?.id ?? order.razorpayPaymentId,
+      ...statusPatch,
+    });
   } else if (event === "payment.failed" && order.paymentStatus !== "paid") {
     await db.update(ordersTable).set({ paymentStatus: "failed" }).where(eq(ordersTable.id, order.id));
   } else {
@@ -166,6 +193,14 @@ router.post("/webhooks/whatsapp", async (req, res) => {
           await db.update(whatsappEventsTable).set({ status: status.status }).where(eq(whatsappEventsTable.waMessageId, status.id));
         }
         for (const msg of v.messages ?? []) {
+          // WhatsApp re-delivers a message until we answer 200 — don't reply to the same message twice.
+          const [seen] = await db
+            .select({ id: whatsappEventsTable.id })
+            .from(whatsappEventsTable)
+            .where(and(eq(whatsappEventsTable.type, "inbound_message"), eq(whatsappEventsTable.waMessageId, msg.id)))
+            .limit(1);
+          if (seen) continue;
+
           await db.insert(whatsappEventsTable).values({
             type: "inbound_message",
             waMessageId: msg.id,
@@ -173,6 +208,8 @@ router.post("/webhooks/whatsapp", async (req, res) => {
             body: msg.text?.body ?? `[${msg.type}]`,
             payload: msg,
           });
+          // Awaited on purpose: on Vercel the function is frozen once the response is sent.
+          await handleInboundMessage(msg);
         }
       }
     }

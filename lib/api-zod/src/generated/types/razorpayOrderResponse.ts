@@ -8,4 +8,6 @@
 
 export interface RazorpayOrderResponse {
   razorpayOrderId: string;
+  /** Order number reserved for this checkout; shown in Razorpay */
+  orderNumber?: string;
 }

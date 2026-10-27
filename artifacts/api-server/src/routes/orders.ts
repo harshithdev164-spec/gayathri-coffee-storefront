@@ -1,10 +1,10 @@
 import { Router, type IRouter } from "express";
-import { db, ordersTable, orderItemsTable } from "@workspace/db";
+import { eq } from "drizzle-orm";
+import { db, pendingCheckoutsTable } from "@workspace/db";
 import { CreateOrderBody, CreateOrderResponse } from "@workspace/api-zod";
-import { shapeOrder, generateOrderNumber } from "../lib/order-shape";
+import { shapeOrder } from "../lib/order-shape";
 import { verifyRazorpaySignature } from "../lib/razorpay";
-import { sendOrderConfirmationEmail } from "../lib/email";
-import { sendOrderConfirmedWhatsApp, sendAdminNewOrderAlert, sendPackingAlert } from "../lib/whatsapp";
+import { CheckoutPayload, createOrder } from "../lib/order-create";
 
 const router: IRouter = Router();
 
@@ -14,13 +14,15 @@ router.post("/orders", async (req, res) => {
     res.status(400).json({ error: "Invalid request" });
     return;
   }
-  const { items, razorpayOrderId, razorpayPaymentId, razorpaySignature, ...orderFields } = parsed.data;
-  if (items.length === 0) {
+  const { razorpayOrderId, razorpayPaymentId, razorpaySignature, ...rest } = parsed.data;
+  let payload = CheckoutPayload.parse(rest);
+  if (payload.items.length === 0) {
     res.status(400).json({ error: "An order needs at least one item" });
     return;
   }
 
-  let paymentStatus = "pending";
+  let razorpay: { orderId: string; paymentId: string } | undefined;
+  let orderNumber: string | undefined;
   if (razorpayOrderId || razorpayPaymentId || razorpaySignature) {
     if (!razorpayOrderId || !razorpayPaymentId || !razorpaySignature) {
       res.status(400).json({ error: "Incomplete Razorpay payment verification data" });
@@ -30,50 +32,20 @@ router.post("/orders", async (req, res) => {
       res.status(400).json({ error: "Payment verification failed" });
       return;
     }
-    paymentStatus = "paid";
+    razorpay = { orderId: razorpayOrderId, paymentId: razorpayPaymentId };
+
+    // The checkout we saved before the customer paid is the source of truth: it carries the order
+    // number shown in Razorpay and can't be altered by the browser after payment.
+    const [pending] = await db.select().from(pendingCheckoutsTable).where(eq(pendingCheckoutsTable.razorpayOrderId, razorpayOrderId)).limit(1);
+    if (pending) {
+      const saved = CheckoutPayload.safeParse(pending.payload);
+      if (saved.success) payload = saved.data;
+      orderNumber = pending.orderNumber;
+    }
   }
 
-  const [order] = await db
-    .insert(ordersTable)
-    .values({
-      ...orderFields,
-      notes: orderFields.notes ?? null,
-      email: orderFields.email ?? null,
-      state: orderFields.state ?? null,
-      billingAddress: orderFields.billingAddress ?? null,
-      billingCity: orderFields.billingCity ?? null,
-      billingPincode: orderFields.billingPincode ?? null,
-      billingState: orderFields.billingState ?? null,
-      orderNumber: generateOrderNumber(),
-      paymentStatus,
-      razorpayOrderId: razorpayOrderId ?? null,
-      razorpayPaymentId: razorpayPaymentId ?? null,
-    })
-    .returning();
-  if (!order) {
-    res.status(500).json({ error: "Failed to create order" });
-    return;
-  }
-
-  const savedItems = await db
-    .insert(orderItemsTable)
-    .values(
-      items.map((item) => ({
-        orderId: order.id,
-        productVariantId: item.productVariantId ?? null,
-        nameSnapshot: item.name,
-        priceSnapshot: item.price,
-        quantity: item.quantity,
-      })),
-    )
-    .returning();
-
-  void sendOrderConfirmationEmail(order, savedItems);
-  void sendOrderConfirmedWhatsApp(order);
-  void sendAdminNewOrderAlert(order);
-  void sendPackingAlert(order, savedItems);
-
-  res.status(201).json(CreateOrderResponse.parse(shapeOrder(order, savedItems)));
+  const { order, items } = await createOrder({ payload, razorpay, orderNumber });
+  res.status(201).json(CreateOrderResponse.parse(shapeOrder(order, items)));
 });
 
 export default router;

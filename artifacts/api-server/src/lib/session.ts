@@ -23,3 +23,10 @@ export function getAdminSession(req: Request): string | null {
   const value = req.signedCookies?.[COOKIE_NAME];
   return typeof value === "string" ? value : null;
 }
+
+// Local-development escape hatch: set ADMIN_AUTH_DISABLED=true to open the admin
+// panel without logging in. Ignored in production and on Vercel, so it can never
+// expose live orders even if the variable is copied there by mistake.
+export function isAdminAuthDisabled(): boolean {
+  return process.env.ADMIN_AUTH_DISABLED === "true" && process.env.NODE_ENV !== "production" && !process.env.VERCEL;
+}

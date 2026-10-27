@@ -400,11 +400,41 @@ export const GetPaymentSettingsResponse = zod.object({
  * @summary Create a Razorpay order for checkout
  */
 export const CreateRazorpayOrderBody = zod.object({
-  "amount": zod.number().int().describe('Rupees (not paise)')
+  "amount": zod.number().int().describe('Rupees (not paise)'),
+  "checkout": zod.object({
+  "customerName": zod.string(),
+  "phone": zod.string(),
+  "email": zod.string().nullish(),
+  "address": zod.string(),
+  "city": zod.string(),
+  "pincode": zod.string(),
+  "state": zod.string().nullish().describe('Shipping state — determines CGST+SGST vs IGST on the invoice'),
+  "billingAddress": zod.string().nullish().describe('Only set when billing address differs from the shipping address above'),
+  "billingCity": zod.string().nullish(),
+  "billingPincode": zod.string().nullish(),
+  "billingState": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "subtotal": zod.number().int(),
+  "shippingMethod": zod.enum(['shiprocket', 'india_post']),
+  "shippingFee": zod.number().int(),
+  "packagingFee": zod.number().int().optional(),
+  "total": zod.number().int(),
+  "paymentMethod": zod.string(),
+  "razorpayOrderId": zod.string().optional().describe('Present when paid via Razorpay; verified server-side before the order is created'),
+  "razorpayPaymentId": zod.string().optional(),
+  "razorpaySignature": zod.string().optional(),
+  "items": zod.array(zod.object({
+  "productVariantId": zod.string().nullish(),
+  "name": zod.string(),
+  "price": zod.number().int(),
+  "quantity": zod.number().int()
+}))
+}).optional().describe('The full checkout, saved server-side before payment so a paid order can always be rebuilt')
 })
 
 export const CreateRazorpayOrderResponse = zod.object({
-  "razorpayOrderId": zod.string()
+  "razorpayOrderId": zod.string(),
+  "orderNumber": zod.string().optional().describe('Order number reserved for this checkout; shown in Razorpay')
 })
 
 
@@ -500,6 +530,7 @@ export const CreateOrderBody = zod.object({
   "subtotal": zod.number().int(),
   "shippingMethod": zod.enum(['shiprocket', 'india_post']),
   "shippingFee": zod.number().int(),
+  "packagingFee": zod.number().int().optional(),
   "total": zod.number().int(),
   "paymentMethod": zod.string(),
   "razorpayOrderId": zod.string().optional().describe('Present when paid via Razorpay; verified server-side before the order is created'),
@@ -516,6 +547,7 @@ export const CreateOrderBody = zod.object({
 export const CreateOrderResponse = zod.object({
   "id": zod.string(),
   "orderNumber": zod.string(),
+  "invoiceNumber": zod.string().nullish(),
   "customerName": zod.string(),
   "phone": zod.string(),
   "email": zod.string().nullish(),
@@ -531,12 +563,18 @@ export const CreateOrderResponse = zod.object({
   "subtotal": zod.number().int(),
   "shippingMethod": zod.string(),
   "shippingFee": zod.number().int(),
+  "packagingFee": zod.number().int().optional(),
+  "source": zod.string().optional(),
   "total": zod.number().int(),
   "paymentMethod": zod.string(),
   "paymentStatus": zod.string(),
   "status": zod.string(),
   "trackingNumber": zod.string().nullish(),
   "trackingUrl": zod.string().nullish(),
+  "courierName": zod.string().nullish(),
+  "shiprocketShipmentId": zod.string().nullish(),
+  "pickupScheduledFor": zod.string().nullish(),
+  "razorpayPaymentId": zod.string().nullish(),
   "createdAt": zod.string(),
   "items": zod.array(zod.object({
   "id": zod.string(),
@@ -554,6 +592,7 @@ export const CreateOrderResponse = zod.object({
 export const AdminListOrdersResponseItem = zod.object({
   "id": zod.string(),
   "orderNumber": zod.string(),
+  "invoiceNumber": zod.string().nullish(),
   "customerName": zod.string(),
   "phone": zod.string(),
   "email": zod.string().nullish(),
@@ -569,12 +608,18 @@ export const AdminListOrdersResponseItem = zod.object({
   "subtotal": zod.number().int(),
   "shippingMethod": zod.string(),
   "shippingFee": zod.number().int(),
+  "packagingFee": zod.number().int().optional(),
+  "source": zod.string().optional(),
   "total": zod.number().int(),
   "paymentMethod": zod.string(),
   "paymentStatus": zod.string(),
   "status": zod.string(),
   "trackingNumber": zod.string().nullish(),
   "trackingUrl": zod.string().nullish(),
+  "courierName": zod.string().nullish(),
+  "shiprocketShipmentId": zod.string().nullish(),
+  "pickupScheduledFor": zod.string().nullish(),
+  "razorpayPaymentId": zod.string().nullish(),
   "createdAt": zod.string(),
   "items": zod.array(zod.object({
   "id": zod.string(),
@@ -598,6 +643,7 @@ export const AdminShipOrderParams = zod.object({
 export const AdminShipOrderResponse = zod.object({
   "id": zod.string(),
   "orderNumber": zod.string(),
+  "invoiceNumber": zod.string().nullish(),
   "customerName": zod.string(),
   "phone": zod.string(),
   "email": zod.string().nullish(),
@@ -613,12 +659,18 @@ export const AdminShipOrderResponse = zod.object({
   "subtotal": zod.number().int(),
   "shippingMethod": zod.string(),
   "shippingFee": zod.number().int(),
+  "packagingFee": zod.number().int().optional(),
+  "source": zod.string().optional(),
   "total": zod.number().int(),
   "paymentMethod": zod.string(),
   "paymentStatus": zod.string(),
   "status": zod.string(),
   "trackingNumber": zod.string().nullish(),
   "trackingUrl": zod.string().nullish(),
+  "courierName": zod.string().nullish(),
+  "shiprocketShipmentId": zod.string().nullish(),
+  "pickupScheduledFor": zod.string().nullish(),
+  "razorpayPaymentId": zod.string().nullish(),
   "createdAt": zod.string(),
   "items": zod.array(zod.object({
   "id": zod.string(),
@@ -646,6 +698,7 @@ export const AdminUpdateOrderBody = zod.object({
 export const AdminUpdateOrderResponse = zod.object({
   "id": zod.string(),
   "orderNumber": zod.string(),
+  "invoiceNumber": zod.string().nullish(),
   "customerName": zod.string(),
   "phone": zod.string(),
   "email": zod.string().nullish(),
@@ -661,12 +714,18 @@ export const AdminUpdateOrderResponse = zod.object({
   "subtotal": zod.number().int(),
   "shippingMethod": zod.string(),
   "shippingFee": zod.number().int(),
+  "packagingFee": zod.number().int().optional(),
+  "source": zod.string().optional(),
   "total": zod.number().int(),
   "paymentMethod": zod.string(),
   "paymentStatus": zod.string(),
   "status": zod.string(),
   "trackingNumber": zod.string().nullish(),
   "trackingUrl": zod.string().nullish(),
+  "courierName": zod.string().nullish(),
+  "shiprocketShipmentId": zod.string().nullish(),
+  "pickupScheduledFor": zod.string().nullish(),
+  "razorpayPaymentId": zod.string().nullish(),
   "createdAt": zod.string(),
   "items": zod.array(zod.object({
   "id": zod.string(),

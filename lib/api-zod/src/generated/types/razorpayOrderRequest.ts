@@ -5,8 +5,11 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { OrderInput } from './orderInput';
 
 export interface RazorpayOrderRequest {
   /** Rupees (not paise) */
   amount: number;
+  /** The full checkout, saved server-side before payment so a paid order can always be rebuilt */
+  checkout?: OrderInput;
 }

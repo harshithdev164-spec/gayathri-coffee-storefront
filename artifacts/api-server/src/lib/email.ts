@@ -1,10 +1,13 @@
 import type { Order, OrderItem } from "@workspace/db";
 import { logger } from "./logger";
 import { generateInvoicePdf } from "./invoice";
+import { EMAIL_LOGO_BASE64 } from "./email-logo";
 
 export function isEmailConfigured(): boolean {
   return Boolean(process.env.ZEPTOMAIL_API_KEY && process.env.EMAIL_FROM);
 }
+
+const LOGO_CID = "mhc-logo";
 
 type Attachment = { name: string; content: string; mimeType: string };
 
@@ -19,10 +22,12 @@ async function sendEmail(to: string, toName: string, subject: string, html: stri
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: apiKey },
     body: JSON.stringify({
-      from: { address: from, name: "Gayathri Coffee" },
+      from: { address: from, name: "Mysore Heritage Coffee" },
       to: [{ email_address: { address: to, name: toName } }],
       subject,
       htmlbody: html,
+      // Logo travels inside the email (referenced as cid:mhc-logo) so it can't break like a hosted URL.
+      inline_images: [{ mime_type: "image/jpeg", content: EMAIL_LOGO_BASE64, cid: LOGO_CID }],
       ...(attachments?.length
         ? { attachments: attachments.map((a) => ({ name: a.name, content: a.content, mime_type: a.mimeType })) }
         : {}),
@@ -47,10 +52,6 @@ const INK = "#2a160c";
 const MUTED = "#8a6f61";
 const BORDER = "#e8dcc8";
 
-function logoUrl(): string {
-  return process.env.EMAIL_LOGO_URL ?? "https://gayathricoffee.com/mysore-heritage-logo.jpeg";
-}
-
 function siteUrl(): string {
   return process.env.EMAIL_SITE_URL ?? "https://gayathricoffee.com";
 }
@@ -63,7 +64,7 @@ function wrapEmail(opts: { preheader: string; heading: string; subheading?: stri
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Gayathri Coffee</title>
+<title>Mysore Heritage Coffee</title>
 </head>
 <body style="margin:0;padding:0;background-color:${CREAM};font-family:Georgia,'Times New Roman',serif;">
   <div style="display:none;max-height:0;overflow:hidden;opacity:0;">${opts.preheader}</div>
@@ -73,9 +74,11 @@ function wrapEmail(opts: { preheader: string; heading: string; subheading?: stri
         <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background-color:${CARD};border-radius:18px;overflow:hidden;border:1px solid ${BORDER};">
 
           <tr>
-            <td style="background-color:${MAROON};padding:28px 32px;text-align:center;">
-              <img src="${logoUrl()}" alt="Gayathri Coffee" width="56" height="56" style="border-radius:50%;display:block;margin:0 auto 12px;border:2px solid ${GOLD};" />
-              <p style="margin:0;font-family:Georgia,serif;font-size:13px;letter-spacing:.18em;text-transform:uppercase;color:${GOLD};">Mysore Heritage Coffee</p>
+            <td style="background-color:${RUST};padding:28px 32px;text-align:center;">
+              <div style="display:inline-block;background-color:#ffffff;border-radius:14px;padding:8px 10px;margin:0 auto 14px;">
+                <img src="cid:${LOGO_CID}" alt="Gayathri Coffee" height="72" style="display:block;height:72px;width:auto;" />
+              </div>
+              <p style="margin:0;font-family:Georgia,serif;font-size:13px;letter-spacing:.18em;text-transform:uppercase;color:#fdf8f1;">Mysore Heritage Coffee</p>
             </td>
           </tr>
 
@@ -143,6 +146,14 @@ function summaryRows(order: Order): string {
         <td style="padding:3px 0;font-size:13px;color:${MUTED};">Shipping</td>
         <td style="padding:3px 0;font-size:13px;color:${INK};text-align:right;">${order.shippingFee === 0 ? "Free" : money(order.shippingFee)}</td>
       </tr>
+      ${
+        order.packagingFee > 0
+          ? `<tr>
+        <td style="padding:3px 0;font-size:13px;color:${MUTED};">Packaging</td>
+        <td style="padding:3px 0;font-size:13px;color:${INK};text-align:right;">${money(order.packagingFee)}</td>
+      </tr>`
+          : ""
+      }
       <tr>
         <td style="padding:10px 0 0;font-size:15px;font-weight:bold;color:${MAROON};border-top:1px solid ${BORDER};">Total</td>
         <td style="padding:10px 0 0;font-size:15px;font-weight:bold;color:${MAROON};text-align:right;border-top:1px solid ${BORDER};">${money(order.total)}</td>
@@ -202,11 +213,10 @@ export async function sendOrderConfirmationEmail(order: Order, items: OrderItem[
 export async function sendShippingUpdateEmail(order: Order): Promise<void> {
   if (!isEmailConfigured() || !order.email) return;
 
-  const trackingBlock = order.trackingUrl
-    ? button("Track your order", order.trackingUrl)
-    : order.trackingNumber
-      ? `<p style="margin:16px 0 0;font-size:13px;color:${INK};">Tracking number: <strong>${order.trackingNumber}</strong></p>`
-      : "";
+  const trackingNumberLine = order.trackingNumber
+    ? `<p style="margin:16px 0 0;font-size:13px;color:${INK};">Tracking number: <strong>${order.trackingNumber}</strong></p>`
+    : "";
+  const trackingBlock = order.trackingUrl ? trackingNumberLine + button("Track your order", order.trackingUrl) : trackingNumberLine;
 
   const bodyHtml = `
     <p style="margin:0 0 4px;">Hi ${order.customerName},</p>

@@ -13,7 +13,7 @@ import {
   AdminVerifyOtpBody,
   AdminVerifyOtpResponse,
 } from "@workspace/api-zod";
-import { setAdminSession, clearAdminSession, getAdminSession } from "../../lib/session";
+import { setAdminSession, clearAdminSession, getAdminSession, isAdminAuthDisabled } from "../../lib/session";
 import { sendAdminOtpWhatsApp } from "../../lib/whatsapp";
 
 const OTP_TTL_MS = 5 * 60 * 1000;
@@ -142,6 +142,10 @@ router.post("/admin/logout", (_req, res) => {
 });
 
 router.get("/admin/me", async (req, res) => {
+  if (isAdminAuthDisabled()) {
+    res.json(AdminMeResponse.parse({ email: "local-dev@localhost.test" }));
+    return;
+  }
   const adminUserId = getAdminSession(req);
   if (!adminUserId) {
     res.status(401).json({ error: "Not authenticated" });
