@@ -2,7 +2,7 @@ import { Router, type IRouter } from "express";
 import { z } from "zod";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { db, ordersTable, whatsappEventsTable } from "@workspace/db";
-import { requireAdmin } from "../../middlewares/require-admin";
+import { requireAdmin, requirePermission } from "../../middlewares/require-admin";
 import { isWhatsAppConfigured, sendFollowUpTemplate, sendWhatsAppText } from "../../lib/whatsapp";
 
 const router: IRouter = Router();
@@ -31,7 +31,7 @@ function previewOf(type: ChatType, body: string | null, templateName: string | n
 }
 
 // One row per customer: who they are, their last message and whether the 24-hour window is still open.
-router.get("/whatsapp/conversations", async (_req, res) => {
+router.get("/whatsapp/conversations", requirePermission("whatsapp"), async (_req, res) => {
   const rows = await db
     .select({
       phone: whatsappEventsTable.fromPhone,
@@ -106,7 +106,7 @@ router.get("/whatsapp/conversations", async (_req, res) => {
   );
 });
 
-router.get("/whatsapp/conversations/:phone", async (req, res) => {
+router.get("/whatsapp/conversations/:phone", requirePermission("whatsapp"), async (req, res) => {
   const phone = req.params.phone.replace(/\D/g, "");
   const events = await db
     .select()
@@ -147,7 +147,7 @@ router.get("/whatsapp/conversations/:phone", async (req, res) => {
 
 const ReplyBody = z.object({ text: z.string().trim().min(1).max(4000) });
 
-router.post("/whatsapp/conversations/:phone/reply", async (req, res) => {
+router.post("/whatsapp/conversations/:phone/reply", requirePermission("whatsapp"), async (req, res) => {
   const parsed = ReplyBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Type a message to send." });
@@ -182,7 +182,7 @@ router.post("/whatsapp/conversations/:phone/reply", async (req, res) => {
 });
 
 // Re-opens a closed conversation with the approved follow-up template.
-router.post("/whatsapp/conversations/:phone/follow-up", async (req, res) => {
+router.post("/whatsapp/conversations/:phone/follow-up", requirePermission("whatsapp"), async (req, res) => {
   if (!isWhatsAppConfigured()) {
     res.status(503).json({ error: "WhatsApp isn't connected on this server." });
     return;

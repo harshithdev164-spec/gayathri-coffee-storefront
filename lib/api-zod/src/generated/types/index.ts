@@ -11,6 +11,7 @@ export * from './adminGetStatsGranularity';
 export * from './adminGetStatsParams';
 export * from './adminLoginRequest';
 export * from './adminMe';
+export * from './adminMeRole';
 export * from './adminStatsCategory';
 export * from './adminStatsCity';
 export * from './adminStatsKpi';

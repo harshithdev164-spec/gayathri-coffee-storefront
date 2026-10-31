@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db, ordersTable, orderItemsTable, pendingCheckoutsTable, type Order, type OrderItem } from "@workspace/db";
 import { CreateOrderBody } from "@workspace/api-zod";
 import { nextInvoiceNumber, nextOrderNumber } from "./order-shape";
@@ -23,28 +23,27 @@ type CreateOrderOptions = {
 
 export type CreatedOrder = { order: Order; items: OrderItem[]; created: boolean };
 
-async function loadExisting(razorpayOrderId: string): Promise<CreatedOrder | null> {
-  const [order] = await db.select().from(ordersTable).where(eq(ordersTable.razorpayOrderId, razorpayOrderId)).limit(1);
-  if (!order) return null;
-  const items = await db.select().from(orderItemsTable).where(eq(orderItemsTable.orderId, order.id));
-  return { order, items, created: false };
-}
-
 // The single place orders are created. Safe to call from the browser, the Razorpay webhook and the
 // reconcile job at the same time for the same payment — only one of them creates the order, the rest
 // get that same order back.
 export async function createOrder({ payload, razorpay, orderNumber }: CreateOrderOptions): Promise<CreatedOrder> {
-  if (razorpay) {
-    const existing = await loadExisting(razorpay.orderId);
-    if (existing) return existing;
-  }
-
   const paid = Boolean(razorpay);
   const { items, ...orderFields } = payload;
 
-  let order: Order | undefined;
-  try {
-    [order] = await db
+  // Everything that must happen exactly once per payment runs in one transaction, behind a lock on the
+  // Razorpay order id. If the browser and the webhook arrive together, the second waits, then finds the
+  // order already there - so there is never a duplicate order and never a skipped bill number.
+  const outcome = await db.transaction(async (tx) => {
+    if (razorpay) {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${razorpay.orderId}))`);
+      const [existingOrder] = await tx.select().from(ordersTable).where(eq(ordersTable.razorpayOrderId, razorpay.orderId)).limit(1);
+      if (existingOrder) {
+        const existingItems = await tx.select().from(orderItemsTable).where(eq(orderItemsTable.orderId, existingOrder.id));
+        return { order: existingOrder, items: existingItems, created: false };
+      }
+    }
+
+    const [created] = await tx
       .insert(ordersTable)
       .values({
         ...orderFields,
@@ -55,8 +54,8 @@ export async function createOrder({ payload, razorpay, orderNumber }: CreateOrde
         billingCity: orderFields.billingCity ?? null,
         billingPincode: orderFields.billingPincode ?? null,
         billingState: orderFields.billingState ?? null,
-        orderNumber: orderNumber ?? (await nextOrderNumber()),
-        invoiceNumber: await nextInvoiceNumber(),
+        orderNumber: orderNumber ?? (await nextOrderNumber(tx)),
+        invoiceNumber: await nextInvoiceNumber(tx),
         paymentStatus: paid ? "paid" : "pending",
         // A verified payment means the order is confirmed (auto-accepted), not just awaiting payment.
         status: paid ? "confirmed" : "pending",
@@ -64,36 +63,31 @@ export async function createOrder({ payload, razorpay, orderNumber }: CreateOrde
         razorpayPaymentId: razorpay?.paymentId ?? null,
       })
       .returning();
-  } catch (err) {
-    // Lost the race to another path creating the same paid order — hand back theirs.
-    if (razorpay && (err as { code?: string }).code === "23505") {
-      const existing = await loadExisting(razorpay.orderId);
-      if (existing) return existing;
+    if (!created) throw new Error("Failed to create order");
+
+    const createdItems = await tx
+      .insert(orderItemsTable)
+      .values(
+        items.map((item) => ({
+          orderId: created.id,
+          productVariantId: item.productVariantId ?? null,
+          nameSnapshot: item.name,
+          priceSnapshot: item.price,
+          quantity: item.quantity,
+        })),
+      )
+      .returning();
+
+    if (razorpay) {
+      await tx.update(pendingCheckoutsTable).set({ completedAt: new Date() }).where(eq(pendingCheckoutsTable.razorpayOrderId, razorpay.orderId));
     }
-    throw err;
-  }
-  if (!order) throw new Error("Failed to create order");
+    return { order: created, items: createdItems, created: true };
+  });
 
-  const savedItems = await db
-    .insert(orderItemsTable)
-    .values(
-      items.map((item) => ({
-        orderId: order.id,
-        productVariantId: item.productVariantId ?? null,
-        nameSnapshot: item.name,
-        priceSnapshot: item.price,
-        quantity: item.quantity,
-      })),
-    )
-    .returning();
-
-  if (razorpay) {
-    await db
-      .update(pendingCheckoutsTable)
-      .set({ completedAt: new Date() })
-      .where(eq(pendingCheckoutsTable.razorpayOrderId, razorpay.orderId))
-      .catch((err) => logger.warn({ err }, "Could not mark the pending checkout as completed"));
-  }
+  // Already created by the other path - nothing more to do (and no second set of messages).
+  if (!outcome.created) return outcome;
+  const order = outcome.order;
+  const savedItems = outcome.items;
 
   await sendNotifications(`new order ${order.orderNumber}`, [
     sendOrderConfirmationEmail(order, savedItems),
@@ -123,12 +117,16 @@ export async function createOrder({ payload, razorpay, orderNumber }: CreateOrde
 
 // Rebuilds the order for a Razorpay payment whose browser never reported back. Returns null when we
 // have no saved checkout for it (e.g. payments made before checkouts were saved).
-export async function createOrderFromPendingCheckout(razorpayOrderId: string, razorpayPaymentId: string): Promise<CreatedOrder | null> {
+export async function createOrderFromPendingCheckout(razorpayOrderId: string, razorpayPaymentId: string, paidAmountPaise?: number): Promise<CreatedOrder | null> {
   const [pending] = await db.select().from(pendingCheckoutsTable).where(eq(pendingCheckoutsTable.razorpayOrderId, razorpayOrderId)).limit(1);
   if (!pending) return null;
   const payload = CheckoutPayload.safeParse(pending.payload);
   if (!payload.success) {
     logger.error({ razorpayOrderId, issues: payload.error.issues }, "Saved checkout is not a valid order — cannot auto-create it");
+    return null;
+  }
+  if (paidAmountPaise !== undefined && paidAmountPaise !== Math.round(payload.data.total * 100)) {
+    logger.error({ razorpayOrderId, paidAmountPaise, expected: payload.data.total * 100 }, "Paid amount differs from the saved checkout - not auto-creating, needs a human");
     return null;
   }
   return createOrder({

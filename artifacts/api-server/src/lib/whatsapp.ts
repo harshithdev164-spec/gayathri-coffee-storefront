@@ -18,7 +18,9 @@ function normalizeIndianPhone(phone: string): string | null {
   return null;
 }
 
-async function sendWhatsAppTemplate(to: string, templateName: string, bodyParams: string[], orderId?: string): Promise<void> {
+// `copyCodeButton` is for Meta's authentication (login code) templates: they need the code twice -
+// once in the message body and once for the "Copy code" button.
+async function sendWhatsAppTemplate(to: string, templateName: string, bodyParams: string[], orderId?: string, copyCodeButton?: string): Promise<void> {
   const token = process.env.WHATSAPP_ACCESS_TOKEN;
   const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
   if (!token || !phoneNumberId) return;
@@ -36,7 +38,10 @@ async function sendWhatsAppTemplate(to: string, templateName: string, bodyParams
       template: {
         name: templateName,
         language: { code: "en" },
-        components: [{ type: "body", parameters: bodyParams.map((text) => ({ type: "text", text })) }],
+        components: [
+          { type: "body", parameters: bodyParams.map((text) => ({ type: "text", text })) },
+          ...(copyCodeButton ? [{ type: "button", sub_type: "url", index: "0", parameters: [{ type: "text", text: copyCodeButton }] }] : []),
+        ],
       },
     }),
   });
@@ -117,7 +122,7 @@ export async function sendOrderShippedWhatsApp(order: Order): Promise<void> {
 export async function sendAdminOtpWhatsApp(phone: string, code: string): Promise<boolean> {
   if (!isWhatsAppConfigured()) return false;
   try {
-    await sendWhatsAppTemplate(phone, "gc_admin_otp_v1", [code]);
+    await sendWhatsAppTemplate(phone, "gc_admin_otp_v1", [code], undefined, code);
     return true;
   } catch (err) {
     logger.error({ err }, "WhatsApp admin OTP send failed");

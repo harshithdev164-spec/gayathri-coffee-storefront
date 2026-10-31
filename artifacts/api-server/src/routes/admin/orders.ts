@@ -1,14 +1,14 @@
 import { Router, type IRouter } from "express";
 import { z } from "zod";
-import { desc, eq, inArray } from "drizzle-orm";
+import { desc, eq, inArray, sql } from "drizzle-orm";
 import { db, ordersTable, orderItemsTable } from "@workspace/db";
 import { AdminListOrdersResponse, AdminUpdateOrderBody, AdminUpdateOrderResponse, AdminShipOrderResponse } from "@workspace/api-zod";
-import { requireAdmin } from "../../middlewares/require-admin";
+import { requireAdmin, requirePermission } from "../../middlewares/require-admin";
 import { shapeOrder, nextOrderIdentifiers } from "../../lib/order-shape";
 import { sendNotifications } from "../../lib/notify";
 import { sendOrderConfirmationEmail } from "../../lib/email";
 import { sendOrderConfirmedWhatsApp } from "../../lib/whatsapp";
-import { getShiprocketLabelUrl, isShiprocketConfigured } from "../../lib/shiprocket";
+import { getShiprocketLabelUrl, getShiprocketWalletBalance, isShiprocketConfigured } from "../../lib/shiprocket";
 import { shipOrderViaShiprocket } from "../../lib/shiprocket-ship";
 import { generateInvoicePdf } from "../../lib/invoice";
 import { updateOrderStatus } from "../../lib/order-transitions";
@@ -16,14 +16,21 @@ import { indiaPostTrackingUrl } from "../../lib/india-post";
 import { reconcileRazorpayPayments } from "../../lib/payment-reconcile";
 import { isRazorpayConfigured } from "../../lib/razorpay";
 import { PDFDocument } from "pdf-lib";
+import { audit } from "../../lib/audit";
 import { isEmailConfigured, sendShippingUpdateEmail } from "../../lib/email";
 import { isWhatsAppConfigured, sendOrderShippedWhatsApp } from "../../lib/whatsapp";
 
 const router: IRouter = Router();
 router.use(requireAdmin);
 
-router.get("/orders", async (_req, res) => {
-  const orders = await db.select().from(ordersTable).orderBy(desc(ordersTable.createdAt));
+router.get("/orders", requirePermission("orders.view"), async (_req, res) => {
+  // Newest order number first. Orders added by hand carry the date they belong to, so sorting by date
+  // alone scatters the numbers (19859, 19851, 19854, 19853...). Old "GC..." numbers sort by date, last.
+  const isNumbered = sql`${ordersTable.orderNumber} ~ '^[0-9]+$'`;
+  const orders = await db
+    .select()
+    .from(ordersTable)
+    .orderBy(sql`case when ${isNumbered} then 0 else 1 end`, desc(sql`case when ${isNumbered} then ${ordersTable.orderNumber}::bigint end`), desc(ordersTable.createdAt));
   const orderIds = orders.map((order) => order.id);
   const items = orderIds.length ? await db.select().from(orderItemsTable).where(inArray(orderItemsTable.orderId, orderIds)) : [];
 
@@ -31,7 +38,7 @@ router.get("/orders", async (_req, res) => {
   res.json(AdminListOrdersResponse.parse(shaped));
 });
 
-router.patch("/orders/:id", async (req, res) => {
+router.patch("/orders/:id", requirePermission("orders.ship"), async (req, res) => {
   const { id } = req.params;
   const parsed = AdminUpdateOrderBody.safeParse(req.body);
   if (!parsed.success) {
@@ -46,6 +53,7 @@ router.patch("/orders/:id", async (req, res) => {
   }
 
   const order = await updateOrderStatus(existing, parsed.data);
+  await audit(res, "order.updated", order.orderNumber, [parsed.data.status && `status ${existing.status} -> ${parsed.data.status}`, parsed.data.trackingNumber && `tracking ${parsed.data.trackingNumber}`].filter(Boolean).join(", ") || "details");
 
   const items = await db.select().from(orderItemsTable).where(eq(orderItemsTable.orderId, order.id));
   res.json(AdminUpdateOrderResponse.parse(shapeOrder(order, items)));
@@ -68,7 +76,7 @@ async function repeatPdf(bytes: Uint8Array, copies: number): Promise<Uint8Array>
   return out.save();
 }
 
-router.get("/orders/:id/invoice", async (req, res) => {
+router.get("/orders/:id/invoice", requirePermission("orders.invoice"), async (req, res) => {
   const { id } = req.params;
   const [order] = await db.select().from(ordersTable).where(eq(ordersTable.id, id)).limit(1);
   if (!order) {
@@ -78,7 +86,7 @@ router.get("/orders/:id/invoice", async (req, res) => {
   const items = await db.select().from(orderItemsTable).where(eq(orderItemsTable.orderId, id));
 
   const copies = parseCopies(req.query.copies);
-  const pdfBytes = await repeatPdf(await generateInvoicePdf(order, items), copies);
+  const pdfBytes = await generateInvoicePdf(order, items, copies);
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader("Content-Disposition", `attachment; filename="invoice-${order.orderNumber}.pdf"`);
   res.send(Buffer.from(pdfBytes));
@@ -123,7 +131,7 @@ const ManualOrderBody = z.object({
 
 // Records a sale made outside the website — walk-in at a shop, a phone call, WhatsApp — so it gets the
 // same order number, bill number, invoice and tracking as online orders and shows up in the order list.
-router.post("/orders/manual", async (req, res) => {
+router.post("/orders/manual", requirePermission("orders.edit"), async (req, res) => {
   const parsed = ManualOrderBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Please check the order details." });
@@ -192,13 +200,14 @@ router.post("/orders/manual", async (req, res) => {
     ]);
   }
 
+  await audit(res, "order.created", order.orderNumber, `offline order, total Rs ${order.total}`);
   res.status(201).json(shapeOrder(order, savedItems));
 });
 
 // Edits an order before it ships. Orders added by hand can change everything; website orders keep their
 // verified payment details and status, but the customer, address, items and charges can be corrected.
 // The order number and bill number never change.
-router.put("/orders/:id/manual", async (req, res) => {
+router.put("/orders/:id/manual", requirePermission("orders.edit"), async (req, res) => {
   const parsed = ManualOrderBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Please check the order details." });
@@ -270,17 +279,39 @@ router.put("/orders/:id/manual", async (req, res) => {
     return;
   }
 
+  await audit(res, "order.edited", order.orderNumber, `${order.source} order edited, total Rs ${existing.total} -> Rs ${order.total}`);
   res.json(shapeOrder(order, savedItems));
 });
 
+// Shiprocket wallet balance for the dashboard. Looked up live and remembered for a minute so a busy
+// admin screen does not hammer Shiprocket.
+let walletCache: { balance: number; at: number } | null = null;
+router.get("/shiprocket/wallet", requirePermission("wallet", "orders.ship"), async (req, res) => {
+  const threshold = Number(process.env.SHIPROCKET_LOW_BALANCE ?? 500);
+  if (!isShiprocketConfigured()) {
+    res.json({ connected: false, balance: null, lowBalanceAt: threshold, low: false, checkedAt: null });
+    return;
+  }
+  try {
+    if (!walletCache || Date.now() - walletCache.at > 60_000 || req.query.refresh === "1") {
+      walletCache = { balance: await getShiprocketWalletBalance(), at: Date.now() };
+    }
+    res.json({ connected: true, balance: walletCache.balance, lowBalanceAt: threshold, low: walletCache.balance < threshold, checkedAt: new Date(walletCache.at).toISOString() });
+  } catch (err) {
+    res.status(502).json({ error: err instanceof Error ? err.message : "Could not read the Shiprocket wallet." });
+  }
+});
+
 // Checks recent Razorpay payments against our orders and creates any that are missing.
-router.post("/orders/reconcile-payments", async (_req, res) => {
+router.post("/orders/reconcile-payments", requirePermission("payments"), async (_req, res) => {
   if (!isRazorpayConfigured()) {
     res.json({ checked: 0, created: [], unmatched: [] });
     return;
   }
   try {
-    res.json(await reconcileRazorpayPayments(7));
+    const result = await reconcileRazorpayPayments(7);
+    await audit(res, "payments.checked", null, `${result.checked} payments checked, ${result.created.length} orders recovered`);
+    res.json(result);
   } catch (err) {
     res.status(502).json({ error: err instanceof Error ? err.message : "Could not check Razorpay payments." });
   }
@@ -301,7 +332,7 @@ async function loadShiprocketOrder(id: string) {
 
 // Creates the Shiprocket shipment and generates the AWB. Safe to press again after a failure —
 // steps that already succeeded are not repeated.
-router.post("/orders/:id/ship", async (req, res) => {
+router.post("/orders/:id/ship", requirePermission("orders.ship"), async (req, res) => {
   const loaded = await loadShiprocketOrder(req.params.id);
   if (!loaded.ok) {
     res.status(loaded.status).json({ error: loaded.message });
@@ -309,13 +340,14 @@ router.post("/orders/:id/ship", async (req, res) => {
   }
   try {
     const order = await shipOrderViaShiprocket(loaded.order, loaded.items);
+    await audit(res, "order.shiprocket", order.orderNumber, `shipment created${order.trackingNumber ? `, AWB ${order.trackingNumber}` : ""}`);
     res.json(AdminShipOrderResponse.parse(shapeOrder(order, loaded.items)));
   } catch (err) {
     res.status(502).json({ error: err instanceof Error ? err.message : "Could not create the Shiprocket shipment." });
   }
 });
 
-router.post("/orders/:id/schedule-pickup", async (req, res) => {
+router.post("/orders/:id/schedule-pickup", requirePermission("orders.ship"), async (req, res) => {
   const loaded = await loadShiprocketOrder(req.params.id);
   if (!loaded.ok) {
     res.status(loaded.status).json({ error: loaded.message });
@@ -327,6 +359,7 @@ router.post("/orders/:id/schedule-pickup", async (req, res) => {
   }
   try {
     const order = await shipOrderViaShiprocket(loaded.order, loaded.items, { schedulePickup: true });
+    await audit(res, "order.pickup", order.orderNumber, "pickup scheduled");
     res.json(AdminShipOrderResponse.parse(shapeOrder(order, loaded.items)));
   } catch (err) {
     res.status(502).json({ error: err instanceof Error ? err.message : "Could not schedule the pickup." });
@@ -334,7 +367,7 @@ router.post("/orders/:id/schedule-pickup", async (req, res) => {
 });
 
 // Sends the admin to a freshly generated AWB label PDF (Shiprocket's label links expire).
-router.get("/orders/:id/awb-label", async (req, res) => {
+router.get("/orders/:id/awb-label", requirePermission("orders.ship"), async (req, res) => {
   const loaded = await loadShiprocketOrder(req.params.id);
   if (!loaded.ok) {
     res.status(loaded.status).json({ error: loaded.message });
@@ -369,7 +402,7 @@ const SendTrackingBody = z.object({
 // Manual India Post flow: the admin books the parcel at the post office, then
 // sends the customer their tracking details from the order card. Marks the
 // order shipped on first send; sending again just re-notifies the customer.
-router.post("/orders/:id/send-tracking", async (req, res) => {
+router.post("/orders/:id/send-tracking", requirePermission("orders.ship"), async (req, res) => {
   const parsed = SendTrackingBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Enter a valid tracking number." });
@@ -405,6 +438,7 @@ router.post("/orders/:id/send-tracking", async (req, res) => {
   }
 
   const items = await db.select().from(orderItemsTable).where(eq(orderItemsTable.orderId, order.id));
+  await audit(res, "order.tracking", order.orderNumber, `India Post ${trackingNumber}${resent ? " (re-sent)" : ""}`);
   res.json({
     order: shapeOrder(order, items),
     resent,

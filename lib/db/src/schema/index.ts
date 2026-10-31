@@ -4,3 +4,4 @@ export * from "./products";
 export * from "./orders";
 export * from "./packing-recipients";
 export * from "./whatsapp-events";
+export * from "./audit-log";

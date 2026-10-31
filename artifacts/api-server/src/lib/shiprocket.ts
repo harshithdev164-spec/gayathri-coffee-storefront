@@ -26,6 +26,37 @@ async function getShiprocketToken(): Promise<string> {
   return data.token;
 }
 
+type PickupLocation = { name: string; pincode: string };
+let cachedPickup: { value: PickupLocation; expiresAt: number } | null = null;
+
+// The pickup location is whatever it is called in YOUR Shiprocket account (Settings > Pickup Addresses) -
+// it was wrongly assumed to be "Primary", which made Shiprocket reject every order. Set
+// SHIPROCKET_PICKUP_LOCATION to pick a specific one; otherwise the account's first active location is used.
+export async function getPickupLocation(): Promise<PickupLocation> {
+  if (cachedPickup && cachedPickup.expiresAt > Date.now()) return cachedPickup.value;
+
+  const token = await getShiprocketToken();
+  const res = await fetch(`${SHIPROCKET_BASE}/settings/company/pickup`, { headers: { Authorization: `Bearer ${token}` } });
+  const data = (await res.json().catch(() => ({}))) as { data?: { shipping_address?: { pickup_location: string; pin_code: string; status: number }[] } };
+  const locations = data.data?.shipping_address ?? [];
+  if (!res.ok || locations.length === 0) {
+    throw new Error("Shiprocket has no pickup address on your account. Add one in Shiprocket > Settings > Pickup Addresses.");
+  }
+
+  const wanted = process.env.SHIPROCKET_PICKUP_LOCATION?.trim().toLowerCase();
+  const chosen =
+    (wanted && locations.find((l) => l.pickup_location.toLowerCase() === wanted)) ||
+    locations.find((l) => l.status === 2) ||
+    locations[0]!;
+  if (wanted && chosen.pickup_location.toLowerCase() !== wanted) {
+    throw new Error(`SHIPROCKET_PICKUP_LOCATION "${process.env.SHIPROCKET_PICKUP_LOCATION}" isn't in your Shiprocket account. Available: ${locations.map((l) => l.pickup_location).join(", ")}.`);
+  }
+
+  const value = { name: chosen.pickup_location, pincode: chosen.pin_code };
+  cachedPickup = { value, expiresAt: Date.now() + 1000 * 60 * 30 };
+  return value;
+}
+
 type ServiceabilityResponse = {
   data?: {
     available_courier_companies?: { courier_company_id: number; rate: number; etd?: string; courier_name?: string }[];
@@ -33,15 +64,27 @@ type ServiceabilityResponse = {
   };
 };
 
+// Money left in the Shiprocket wallet (in rupees). Every AWB booked takes its freight out of this, and
+// booking fails when it runs out - so the admin dashboard shows it.
+export async function getShiprocketWalletBalance(): Promise<number> {
+  const token = await getShiprocketToken();
+  const res = await fetch(`${SHIPROCKET_BASE}/account/details/wallet-balance`, { headers: { Authorization: `Bearer ${token}` } });
+  const data = (await res.json().catch(() => ({}))) as { data?: { balance_amount?: string | number }; message?: string };
+  const balance = Number(data.data?.balance_amount);
+  if (!res.ok || !Number.isFinite(balance)) throw new Error(data.message || `Could not read the Shiprocket wallet (HTTP ${res.status})`);
+  return balance;
+}
+
 export type ShiprocketRateQuote = { amount: number; etd: string | null; courierName: string | null };
 
 // This is Shiprocket's own shipping calculator: given a pickup/delivery pincode
 // pair, weight and COD-or-not, it returns every courier they'd hand the order to
 // and what each would charge — the real, live equivalent of a flat estimate.
 export async function getShiprocketRate(deliveryPincode: string, weightGrams: number, cod: boolean): Promise<ShiprocketRateQuote> {
-  const pickupPincode = process.env.SHIPROCKET_PICKUP_PINCODE;
+  // Rates must be quoted from where the parcel really leaves, so the Shiprocket pickup address wins.
+  const pickupPincode = (await getPickupLocation().catch(() => null))?.pincode ?? process.env.SHIPROCKET_PICKUP_PINCODE;
   if (!pickupPincode) {
-    throw new Error("SHIPROCKET_PICKUP_PINCODE is not set.");
+    throw new Error("No Shiprocket pickup address found and SHIPROCKET_PICKUP_PINCODE is not set.");
   }
 
   const token = await getShiprocketToken();
@@ -87,6 +130,8 @@ export type ShiprocketOrderInput = {
   items: { name: string; price: number; quantity: number; sku: string }[];
   total: number;
   cod: boolean;
+  // Parcel weight in kilograms; Shiprocket bills freight on it.
+  weightKg?: number;
 };
 
 export type ShiprocketShipmentResult = {
@@ -100,6 +145,7 @@ export async function createShiprocketShipment(order: ShiprocketOrderInput): Pro
   const [firstName, ...rest] = order.customerName.trim().split(/\s+/);
   const lastName = rest.join(" ") || ".";
   const hasSeparateBilling = Boolean(order.billingAddress);
+  const pickup = await getPickupLocation();
   // Shiprocket wants a bare 10-digit mobile number — strip +91 / spaces / dashes.
   const phone = order.phone.replace(/\D/g, "").slice(-10);
   // Address lines must be at least 3 characters; very long item names are rejected.
@@ -113,7 +159,7 @@ export async function createShiprocketShipment(order: ShiprocketOrderInput): Pro
     body: JSON.stringify({
       order_id: order.orderNumber,
       order_date: new Date().toISOString().slice(0, 16).replace("T", " "),
-      pickup_location: "Primary",
+      pickup_location: pickup.name,
       billing_customer_name: firstName || order.customerName,
       billing_last_name: lastName,
       billing_address: padAddress((hasSeparateBilling ? order.billingAddress : order.address) ?? ""),
@@ -147,7 +193,7 @@ export async function createShiprocketShipment(order: ShiprocketOrderInput): Pro
       length: 10,
       breadth: 10,
       height: 10,
-      weight: 0.5,
+      weight: Math.max(order.weightKg ?? 0, 0.5),
     }),
   });
 
@@ -195,12 +241,16 @@ export async function assignShiprocketAwb(shipmentId: string): Promise<AwbAssign
   const data = await shiprocketPost<{
     awb_assign_status?: number;
     message?: string;
-    response?: { data?: { awb_code?: string; courier_name?: string }; message?: string };
+    status_code?: number;
+    response?: { data?: { awb_code?: string; courier_name?: string; awb_assign_error?: string }; message?: string };
   }>("/courier/assign/awb", { shipment_id: shipmentId }, "Shiprocket AWB assignment failed");
 
   const awb = data.response?.data?.awb_code;
   if (!awb) {
-    throw new Error(data.response?.message || data.message || "Shiprocket could not assign an AWB. Check your Shiprocket wallet balance and the order's weight/address.");
+    // Shiprocket explains itself in several different places depending on what went wrong.
+    const reason = data.response?.data?.awb_assign_error || data.response?.message || data.message;
+    const walletHint = /wallet|balance|recharge|insufficient/i.test(reason ?? "") ? " Top up your Shiprocket wallet and try again." : "";
+    throw new Error(`${reason || "Shiprocket could not assign an AWB."}${walletHint} (Check the wallet balance, the parcel weight and the delivery address.)`);
   }
   return { awbCode: String(awb), courierName: data.response?.data?.courier_name ?? null };
 }

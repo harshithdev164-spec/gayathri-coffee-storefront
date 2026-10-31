@@ -36,8 +36,18 @@ router.post("/webhooks/razorpay", async (req, res) => {
   }
 
   const event = req.body?.event as string | undefined;
-  const payment = req.body?.payload?.payment?.entity as { order_id?: string; id?: string } | undefined;
+  const payment = req.body?.payload?.payment?.entity as { order_id?: string; id?: string; amount?: number; amount_refunded?: number } | undefined;
   const razorpayOrderId = payment?.order_id;
+
+  // Money going back to the customer: the order must stop saying "paid".
+  if (event?.startsWith("refund.") && payment?.id) {
+    if (event !== "refund.failed") {
+      const full = (payment.amount_refunded ?? 0) >= (payment.amount ?? Infinity);
+      await db.update(ordersTable).set({ paymentStatus: full ? "refunded" : "partially_refunded" }).where(eq(ordersTable.razorpayPaymentId, payment.id));
+    }
+    res.json({ ok: true });
+    return;
+  }
 
   if (!event || !razorpayOrderId) {
     res.json({ ok: true });
@@ -50,7 +60,7 @@ router.post("/webhooks/razorpay", async (req, res) => {
     // Rebuild it from the checkout we saved before payment — the order is auto-accepted as paid.
     if ((event === "payment.captured" || event === "order.paid") && payment?.id) {
       try {
-        const created = await createOrderFromPendingCheckout(razorpayOrderId, payment.id);
+        const created = await createOrderFromPendingCheckout(razorpayOrderId, payment.id, payment.amount);
         if (created) {
           logger.info({ razorpayOrderId, orderNumber: created.order.orderNumber }, "Razorpay webhook: created the missing order");
         } else {

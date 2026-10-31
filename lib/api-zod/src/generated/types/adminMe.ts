@@ -5,7 +5,12 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { AdminMeRole } from './adminMeRole';
 
 export interface AdminMe {
   email: string;
+  name?: string | null;
+  role: AdminMeRole;
+  /** What this person may do, e.g. orders.edit, orders.ship, analytics */
+  permissions: string[];
 }

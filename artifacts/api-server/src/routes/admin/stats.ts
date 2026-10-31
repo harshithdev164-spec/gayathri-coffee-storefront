@@ -2,7 +2,7 @@ import { Router, type IRouter } from "express";
 import { and, asc, count, desc, eq, gte, lt, sql, sum, type SQL } from "drizzle-orm";
 import { db, ordersTable, orderItemsTable, productVariantsTable, productsTable } from "@workspace/db";
 import { AdminGetStatsQueryParams, AdminGetStatsResponse } from "@workspace/api-zod";
-import { requireAdmin } from "../../middlewares/require-admin";
+import { requireAdmin, requirePermission } from "../../middlewares/require-admin";
 
 const router: IRouter = Router();
 router.use(requireAdmin);
@@ -26,7 +26,7 @@ function nextDay(dateStr: string): Date {
   return d;
 }
 
-router.get("/stats", async (req, res) => {
+router.get("/stats", requirePermission("analytics"), async (req, res) => {
   const parsed = AdminGetStatsQueryParams.safeParse(req.query);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid request" });

@@ -56,15 +56,17 @@ export async function nextOrderIdentifiers(): Promise<{ orderNumber: string; inv
 
 // Order numbers can be reserved before payment (they show up in Razorpay); gaps are harmless.
 // Bill numbers are only allocated when the order is actually created, so invoices stay gap-free.
-export async function nextOrderNumber(): Promise<string> {
-  const result = await db.execute<{ order_no: string }>(sql`select nextval('order_number_seq')::text as order_no`);
+type Executor = Pick<typeof db, "execute">;
+
+export async function nextOrderNumber(executor: Executor = db): Promise<string> {
+  const result = await executor.execute<{ order_no: string }>(sql`select nextval('order_number_seq')::text as order_no`);
   const row = result.rows[0];
   if (!row) throw new Error("Could not allocate an order number");
   return row.order_no;
 }
 
-export async function nextInvoiceNumber(): Promise<string> {
-  const result = await db.execute<{ invoice_no: string }>(sql`select nextval('invoice_number_seq')::text as invoice_no`);
+export async function nextInvoiceNumber(executor: Executor = db): Promise<string> {
+  const result = await executor.execute<{ invoice_no: string }>(sql`select nextval('invoice_number_seq')::text as invoice_no`);
   const row = result.rows[0];
   if (!row) throw new Error("Could not allocate a bill number");
   return `ON${row.invoice_no}`;

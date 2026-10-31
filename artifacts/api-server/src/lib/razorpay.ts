@@ -70,8 +70,25 @@ export type RazorpayPayment = {
   email?: string;
   contact?: string;
   created_at: number;
+  amount_refunded?: number;
   notes?: Record<string, string> | unknown[];
 };
+
+export async function fetchRazorpayPayment(paymentId: string): Promise<RazorpayPayment> {
+  const res = await fetch(`https://api.razorpay.com/v1/payments/${encodeURIComponent(paymentId)}`, { headers: { Authorization: authHeader() } });
+  const data = (await res.json().catch(() => ({}))) as RazorpayPayment & { error?: { description?: string } };
+  if (!res.ok || !data.id) throw new Error(data.error?.description || `Razorpay payment lookup failed (HTTP ${res.status})`);
+  return data;
+}
+
+// The money really arrived: this payment belongs to this Razorpay order, has gone through, and is for
+// exactly the order total. Returns the reason it does not, or null when it does.
+export function paymentMismatch(payment: Pick<RazorpayPayment, "order_id" | "status" | "amount">, razorpayOrderId: string, totalRupees: number): string | null {
+  if (payment.order_id !== razorpayOrderId) return "This payment belongs to a different Razorpay order.";
+  if (payment.status !== "captured" && payment.status !== "authorized") return `The payment is ${payment.status}, not completed.`;
+  if (payment.amount !== Math.round(totalRupees * 100)) return `The payment is for Rs ${payment.amount / 100} but the order total is Rs ${totalRupees}.`;
+  return null;
+}
 
 // Captured payments from the last `days` days, newest first. Used to catch any payment whose order
 // never reached our database.
@@ -86,7 +103,7 @@ export async function listRecentCapturedPayments(days: number): Promise<Razorpay
     const data = (await res.json().catch(() => ({}))) as { items?: RazorpayPayment[]; error?: { description?: string } };
     if (!res.ok) throw new Error(data.error?.description || `Razorpay payment lookup failed (HTTP ${res.status})`);
     const page = data.items ?? [];
-    payments.push(...page.filter((payment) => payment.status === "captured"));
+    payments.push(...page.filter((payment) => payment.status === "captured" || payment.status === "refunded"));
     if (page.length < 100) break;
   }
   return payments;

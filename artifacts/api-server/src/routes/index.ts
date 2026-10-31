@@ -13,6 +13,7 @@ import adminPackingRecipientsRouter from "./admin/packing-recipients";
 import webhooksRouter from "./webhooks";
 import adminWhatsappRouter from "./admin/whatsapp";
 import cronRouter from "./cron";
+import adminUsersRouter from "./admin/users";
 
 const router: IRouter = Router();
 
@@ -35,5 +36,6 @@ router.use("/admin", adminOrdersRouter);
 router.use("/admin", adminStatsRouter);
 router.use("/admin", adminPackingRecipientsRouter);
 router.use("/admin", adminWhatsappRouter);
+router.use("/admin", adminUsersRouter);
 
 export default router;

@@ -7,7 +7,7 @@ import {
   AdminCreatePackingRecipientResponse,
   AdminDeletePackingRecipientResponse,
 } from "@workspace/api-zod";
-import { requireAdmin } from "../../middlewares/require-admin";
+import { requireAdmin, requirePermission } from "../../middlewares/require-admin";
 import type { PackingRecipient } from "@workspace/db";
 
 const router: IRouter = Router();
@@ -17,12 +17,12 @@ function shapeRecipient(recipient: PackingRecipient) {
   return { id: recipient.id, name: recipient.name, phone: recipient.phone, createdAt: recipient.createdAt.toISOString() };
 }
 
-router.get("/packing-recipients", async (_req, res) => {
+router.get("/packing-recipients", requirePermission("packing"), async (_req, res) => {
   const recipients = await db.select().from(packingRecipientsTable).orderBy(desc(packingRecipientsTable.createdAt));
   res.json(AdminListPackingRecipientsResponse.parse(recipients.map(shapeRecipient)));
 });
 
-router.post("/packing-recipients", async (req, res) => {
+router.post("/packing-recipients", requirePermission("packing"), async (req, res) => {
   const parsed = AdminCreatePackingRecipientBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid request" });
@@ -36,7 +36,7 @@ router.post("/packing-recipients", async (req, res) => {
   res.status(201).json(AdminCreatePackingRecipientResponse.parse(shapeRecipient(recipient)));
 });
 
-router.delete("/packing-recipients/:id", async (req, res) => {
+router.delete("/packing-recipients/:id", requirePermission("packing"), async (req, res) => {
   const { id } = req.params;
   await db.delete(packingRecipientsTable).where(eq(packingRecipientsTable.id, id));
   res.json(AdminDeletePackingRecipientResponse.parse({ ok: true }));

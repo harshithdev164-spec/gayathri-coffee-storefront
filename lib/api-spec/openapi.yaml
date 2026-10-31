@@ -615,8 +615,21 @@ components:
         email:
           type: string
           format: email
+        name:
+          type: string
+          nullable: true
+        role:
+          type: string
+          enum: [superadmin, finance, logistics]
+        permissions:
+          type: array
+          items:
+            type: string
+          description: What this person may do, e.g. orders.edit, orders.ship, analytics
       required:
         - email
+        - role
+        - permissions
     OtpRequestInput:
       type: object
       properties:

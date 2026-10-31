@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useLocation } from 'wouter';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as XLSX from 'xlsx';
-import { Plus, Trash2, X, Check, LogOut, ImagePlus, Package, Truck, Settings as SettingsIcon, BarChart3, MapPin, Phone, StickyNote, ExternalLink, Send, MessageCircle, ArrowRight } from 'lucide-react';
+import { Plus, Trash2, X, Check, LogOut, ImagePlus, Package, Truck, Settings as SettingsIcon, BarChart3, MapPin, Phone, StickyNote, ExternalLink, Send, MessageCircle, ArrowRight, Users } from 'lucide-react';
 import {
   ResponsiveContainer,
   ComposedChart,
@@ -67,16 +67,28 @@ function AdminShell({ children }: { children: React.ReactNode }) {
   );
 }
 
-type AdminTab = 'products' | 'orders' | 'whatsapp' | 'analytics' | 'settings';
+// What the logged-in person may do, as sent by the server (the server enforces it too - hiding things
+// here only keeps the screen tidy).
+const PermsContext = createContext<string[]>([]);
+function useCan() {
+  const perms = useContext(PermsContext);
+  return (...anyOf: string[]) => anyOf.some((permission) => perms.includes(permission));
+}
+
+type AdminTab = 'products' | 'orders' | 'whatsapp' | 'analytics' | 'settings' | 'team';
+
+const ALL_TABS: { id: AdminTab; label: string; icon: typeof Package; needs: string[] }[] = [
+  { id: 'orders', label: 'Orders', icon: Truck, needs: ['orders.view'] },
+  { id: 'products', label: 'Products', icon: Package, needs: ['products'] },
+  { id: 'whatsapp', label: 'WhatsApp', icon: MessageCircle, needs: ['whatsapp'] },
+  { id: 'analytics', label: 'Analytics', icon: BarChart3, needs: ['analytics'] },
+  { id: 'settings', label: 'Settings', icon: SettingsIcon, needs: ['settings', 'packing'] },
+  { id: 'team', label: 'Team', icon: Users, needs: ['users'] },
+];
 
 function AdminTabs({ tab, onChange }: { tab: AdminTab; onChange: (tab: AdminTab) => void }) {
-  const tabs: { id: AdminTab; label: string; icon: typeof Package }[] = [
-    { id: 'orders', label: 'Orders', icon: Truck },
-    { id: 'products', label: 'Products', icon: Package },
-    { id: 'whatsapp', label: 'WhatsApp', icon: MessageCircle },
-    { id: 'analytics', label: 'Analytics', icon: BarChart3 },
-    { id: 'settings', label: 'Settings', icon: SettingsIcon },
-  ];
+  const can = useCan();
+  const tabs = ALL_TABS.filter((t) => can(...t.needs));
   return (
     <div className="border-b border-[#decdb9] bg-[#fdf8f1]">
       <div className="mx-auto flex max-w-[1100px] gap-1 px-5 sm:px-8">
@@ -96,7 +108,48 @@ function AdminTabs({ tab, onChange }: { tab: AdminTab; onChange: (tab: AdminTab)
   );
 }
 
-function AdminHeader({ email }: { email: string }) {
+type WalletInfo = { connected: boolean; balance: number | null; lowBalanceAt: number; low: boolean; checkedAt: string | null };
+
+// Shiprocket wallet balance, always visible at the top of the admin. Turns red when it is too low to book
+// more parcels. Re-checked every 5 minutes, and on demand.
+function WalletChip() {
+  const can = useCan();
+  const queryClient = useQueryClient();
+  const allowed = can('wallet', 'orders.ship');
+  const { data, isError, isFetching } = useQuery({
+    queryKey: ['shiprocket-wallet'],
+    queryFn: async () => {
+      const res = await fetch('/api/admin/shiprocket/wallet', { credentials: 'same-origin' });
+      if (!res.ok) throw new Error('wallet');
+      return (await res.json()) as WalletInfo;
+    },
+    enabled: allowed,
+    refetchInterval: 5 * 60_000,
+    retry: false,
+  });
+  if (!allowed || (data && !data.connected)) return null;
+  const refresh = async () => {
+    const res = await fetch('/api/admin/shiprocket/wallet?refresh=1', { credentials: 'same-origin' });
+    if (res.ok) queryClient.setQueryData(['shiprocket-wallet'], await res.json());
+  };
+  const low = Boolean(data?.low);
+  return (
+    <button
+      type="button"
+      onClick={() => void refresh()}
+      title={data?.checkedAt ? `Checked ${new Date(data.checkedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })} - click to refresh` : 'Click to refresh'}
+      className={`flex items-center gap-2 rounded-full border px-4 py-2 text-xs font-semibold ${low ? 'border-[#b83a36] bg-[#b83a36]/10 text-[#b83a36]' : 'border-[#decdb9] text-[#67232d]'}`}
+      data-testid="chip-shiprocket-wallet"
+    >
+      <Truck size={13} />
+      {isError ? 'Wallet unavailable' : data?.balance == null ? 'Wallet…' : `Shiprocket wallet ₹${data.balance.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`}
+      {low ? <span className="rounded-full bg-[#b83a36] px-2 py-0.5 text-[10px] uppercase tracking-[.08em] text-[#fdf8f1]">Low - top up</span> : null}
+      {isFetching ? <span className="text-[10px] font-normal text-[#9a7564]">…</span> : null}
+    </button>
+  );
+}
+
+function AdminHeader({ email, name, role }: { email: string; name?: string | null; role: string }) {
   const [, navigate] = useLocation();
   const queryClient = useQueryClient();
   const logout = useAdminLogout({
@@ -115,8 +168,9 @@ function AdminHeader({ email }: { email: string }) {
           <p className="mono text-[10px] uppercase tracking-[.22em] text-[#c9a15a]">Gayathri Coffee</p>
           <h1 className="serif text-2xl text-[#67232d]">Admin</h1>
         </div>
-        <div className="flex items-center gap-4">
-          <span className="text-xs text-[#9a7564]">{email}</span>
+        <div className="flex flex-wrap items-center justify-end gap-3">
+          <WalletChip />
+          <span className="text-xs text-[#9a7564]">{name ? `${name} · ` : ''}{email} · <span className="font-semibold capitalize text-[#67232d]" data-testid="text-admin-role">{role}</span></span>
           <button
             type="button"
             onClick={() => logout.mutate()}
@@ -364,6 +418,21 @@ function draftFromProduct(product: ProductWithDetails): ProductDraft {
   };
 }
 
+// Price of a pack from the price of 1 kg (or 1 litre), rounded to the nearest 1, 5 or 10 rupees.
+function priceFromPerKg(perKg: number, grams: number, roundTo: number): number {
+  if (!(perKg > 0) || !(grams > 0)) return 0;
+  const raw = (perKg * grams) / 1000;
+  return Math.max(0, Math.round(raw / roundTo) * roundTo);
+}
+
+// For an existing product: the 1 kg price if it has one, otherwise worked back from its default pack.
+function perKgFromVariants(variants: VariantDraft[]): number {
+  const oneKg = variants.find((v) => v.weightGrams === 1000 && v.price > 0);
+  if (oneKg) return oneKg.price;
+  const base = variants.find((v) => v.isDefault && v.price > 0 && v.weightGrams > 0) ?? variants.find((v) => v.price > 0 && v.weightGrams > 0);
+  return base ? Math.round((base.price * 1000) / base.weightGrams) : 0;
+}
+
 function ProductEditor({
   product,
   onClose,
@@ -376,6 +445,11 @@ function ProductEditor({
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // Set the price of 1 kg once; every other weight is worked out from it. New products start in this mode;
+  // existing products keep their hand-set prices until it is switched on.
+  const [perKg, setPerKg] = useState<number>(() => (product ? perKgFromVariants(draftFromProduct(product).variants) : 0));
+  const [autoPrice, setAutoPrice] = useState<boolean>(!product);
+  const [roundTo, setRoundTo] = useState<number>(1);
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: getAdminListProductsQueryKey() });
   const describeError = (err: unknown) => (err instanceof Error ? err.message : 'Something went wrong. Please try again.');
@@ -399,6 +473,16 @@ function ProductEditor({
 
   const setField = <K extends keyof ProductDraft>(key: K, value: ProductDraft[K]) =>
     setDraft((current) => ({ ...current, [key]: value }));
+
+  // Re-price every weight whenever the per-kg price, the rounding, or a weight changes.
+  const weightsKey = draft.variants.map((v) => v.weightGrams).join(',');
+  useEffect(() => {
+    if (!autoPrice || !(perKg > 0)) return;
+    setDraft((current) => {
+      const next = current.variants.map((v) => ({ ...v, price: priceFromPerKg(perKg, v.weightGrams, roundTo) }));
+      return next.every((v, i) => v.price === current.variants[i]!.price) ? current : { ...current, variants: next };
+    });
+  }, [autoPrice, perKg, roundTo, weightsKey]);
 
   const setVariant = (index: number, patch: Partial<VariantDraft>) =>
     setDraft((current) => ({
@@ -528,6 +612,26 @@ function ProductEditor({
                 <Plus size={14} /> {draft.category === 'Decoction' ? 'Add volume' : 'Add weight'}
               </button>
             </div>
+            <div className="mt-3 rounded-xl border border-[#c9a15a]/50 bg-[#c9a15a]/10 p-3" data-testid="box-per-kg-pricing">
+              <div className="grid grid-cols-[1fr_auto] items-end gap-3">
+                <label className="block">
+                  <span className="mono text-[9px] uppercase text-[#9a7564]">{draft.category === 'Decoction' ? 'Price per 1 litre (₹)' : 'Price per 1 kg (₹)'}</span>
+                  <input type="number" min={0} value={perKg || ''} onChange={(e) => setPerKg(Number(e.target.value))} placeholder="e.g. 800" className="w-full bg-transparent text-sm outline-none" data-testid="input-price-per-kg" />
+                </label>
+                <label className="block">
+                  <span className="mono text-[9px] uppercase text-[#9a7564]">Round to</span>
+                  <select value={roundTo} onChange={(e) => setRoundTo(Number(e.target.value))} className="bg-transparent text-sm outline-none" data-testid="select-price-rounding">
+                    <option value={1}>nearest ₹1</option>
+                    <option value={5}>nearest ₹5</option>
+                    <option value={10}>nearest ₹10</option>
+                  </select>
+                </label>
+              </div>
+              <label className="mt-2 flex items-start gap-2 text-xs text-[#775e53]">
+                <input type="checkbox" checked={autoPrice} onChange={(e) => setAutoPrice(e.target.checked)} className="mt-0.5" data-testid="checkbox-auto-price" />
+                <span>Calculate the price of every {draft.category === 'Decoction' ? 'volume' : 'weight'} from this {draft.category === 'Decoction' ? 'per-litre' : 'per-kg'} price{autoPrice && !(perKg > 0) ? ' - enter the price above' : ''}. Untick to type each price by hand.</span>
+              </label>
+            </div>
             <div className="mt-3 space-y-3">
               {draft.variants.map((variant, index) => (
                 <div key={variant.id ?? index} className="grid grid-cols-[1fr_1fr_auto_auto] items-center gap-2 rounded-xl border border-[#decdb9] bg-white p-3">
@@ -537,7 +641,7 @@ function ProductEditor({
                   </label>
                   <label className="block">
                     <span className="mono text-[9px] uppercase text-[#9a7564]">Price (₹)</span>
-                    <input type="number" min={0} required value={variant.price} onChange={(e) => setVariant(index, { price: Number(e.target.value) })} className="w-full bg-transparent text-sm outline-none" data-testid={`input-variant-price-${index}`} />
+                    <input type="number" min={0} required value={variant.price} readOnly={autoPrice && perKg > 0} onChange={(e) => setVariant(index, { price: Number(e.target.value) })} className={`w-full bg-transparent text-sm outline-none ${autoPrice && perKg > 0 ? 'text-[#8a5a2b]' : ''}`} title={autoPrice && perKg > 0 ? 'Worked out from the per-kg price' : undefined} data-testid={`input-variant-price-${index}`} />
                   </label>
                   <label className="flex items-center gap-1.5 text-xs text-[#775e53]">
                     <input type="checkbox" checked={variant.isDefault} onChange={(e) => setVariant(index, { isDefault: e.target.checked })} />
@@ -703,6 +807,8 @@ function OrderSummaryRow({ order, onOpen }: { order: OrderWithItems; onOpen: () 
 
 function OrderDetailModal({ order, onClose, onEdit }: { order: OrderWithItems; onClose: () => void; onEdit?: () => void }) {
   const queryClient = useQueryClient();
+  const can = useCan();
+  const canShip = can('orders.ship');
   const [status, setStatus] = useState(order.status);
   const [trackingNumber, setTrackingNumber] = useState(order.trackingNumber ?? '');
   const [trackingUrl, setTrackingUrl] = useState(order.trackingUrl ?? '');
@@ -871,6 +977,7 @@ function OrderDetailModal({ order, onClose, onEdit }: { order: OrderWithItems; o
             <p className="mt-2 text-xs text-[#9a7564]">Paid via {order.paymentMethod}</p>
           </div>
 
+          {canShip ? (
           <div className="mt-4 rounded-xl border border-[#decdb9] bg-white p-4">
             <div className="flex items-center justify-between">
               <p className="mono text-[10px] uppercase tracking-[.14em] text-[#9a7564]">Fulfillment</p>
@@ -1020,6 +1127,27 @@ function OrderDetailModal({ order, onClose, onEdit }: { order: OrderWithItems; o
               </div>
             ) : null}
           </div>
+          ) : (
+          <div className="mt-4 rounded-xl border border-[#decdb9] bg-white p-4" data-testid="card-order-readonly">
+            <div className="flex items-center justify-between">
+              <p className="mono text-[10px] uppercase tracking-[.14em] text-[#9a7564]">Fulfillment</p>
+              <span className="rounded-full bg-[#67232d]/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[.1em] text-[#67232d]">{carrierLabel(order.shippingMethod)}</span>
+            </div>
+            <p className="mt-3 text-xs text-[#775e53]">Status: <span className={`rounded-full px-3 py-1 text-[10px] font-semibold uppercase tracking-[.1em] ${STATUS_STYLES[order.status] ?? ''}`}>{order.status}</span></p>
+            {order.trackingNumber ? <p className="mt-2 text-xs text-[#775e53]">Tracking: <span className="mono font-semibold text-[#67232d]">{order.trackingNumber}</span></p> : null}
+            {can('orders.invoice') ? (
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <label className="flex items-center gap-2 text-xs text-[#775e53]">
+                  <span className="mono text-[10px] uppercase tracking-[.14em] text-[#9a7564]">Copies to print</span>
+                  <input type="number" min={1} max={20} value={copies} onChange={(e) => setCopies(e.target.value)} className="w-16 rounded-lg border border-[#decdb9] bg-white px-2 py-1.5 text-center text-sm outline-none" />
+                </label>
+                <a href={`/api/admin/orders/${order.id}/invoice?copies=${copiesParam}`} target="_blank" rel="noreferrer" className="flex items-center gap-2 rounded-full border border-[#decdb9] px-5 py-2.5 text-xs font-semibold uppercase tracking-[.12em] text-[#67232d]" data-testid="link-download-invoice">
+                  Download invoice <ExternalLink size={14} />
+                </a>
+              </div>
+            ) : null}
+          </div>
+          )}
         </div>
       </div>
     </div>
@@ -1665,6 +1793,7 @@ function OrdersTab() {
   const [toDate, setToDate] = useState('');
   const [reconcile, setReconcile] = useState<{ busy: boolean; message: string | null; unmatched: ReconcileUnmatched[] }>({ busy: false, message: null, unmatched: [] });
   const queryClient = useQueryClient();
+  const can = useCan();
 
   // Checks Razorpay for any payment that never became an order, and creates it. Runs when the tab
   // opens (quietly) and whenever the button is pressed.
@@ -1686,7 +1815,7 @@ function OrdersTab() {
       setReconcile({ busy: false, unmatched: [], message: quiet ? null : err instanceof Error ? err.message : 'Could not check Razorpay payments.' });
     }
   };
-  useEffect(() => { void checkPayments(true); }, []);
+  useEffect(() => { if (can('payments')) void checkPayments(true); }, []);
   const selectedOrder = selectedId ? (orders?.find((o) => o.id === selectedId) ?? null) : null;
 
   const inTab = (order: OrderWithItems, tab: OrderFilter) => tab === 'all' || (tab === 'offline' ? order.source === 'offline' : order.shippingMethod === tab);
@@ -1715,15 +1844,15 @@ function OrdersTab() {
       <div className="flex items-center justify-between">
         <h2 className="serif text-2xl text-[#67232d]">Orders</h2>
         <div className="flex flex-wrap items-center gap-2">
-        <button
+        {can('orders.edit') ? <button
           type="button"
           onClick={() => setAdding(true)}
           className="flex items-center gap-2 rounded-full bg-[#67232d] px-4 py-2 text-xs font-semibold uppercase tracking-[.1em] text-[#f9e7c5]"
           data-testid="button-add-offline-order"
         >
           <Plus size={14} /> Add offline order
-        </button>
-        <button
+        </button> : null}
+        {can('export') ? <button
           type="button"
           onClick={() => visibleOrders?.length && exportOrdersToExcel(visibleOrders)}
           disabled={!visibleOrders?.length}
@@ -1731,8 +1860,8 @@ function OrdersTab() {
           data-testid="button-export-orders-excel"
         >
           Export {visibleOrders?.length ?? 0} {anyFilter || filter !== 'all' ? 'filtered ' : ''}to Excel <ExternalLink size={14} />
-        </button>
-        <button
+        </button> : null}
+        {can('export', 'orders.ship') ? <button
           type="button"
           onClick={() => visibleOrders?.length && exportTrackingToExcel(visibleOrders)}
           disabled={!visibleOrders?.length}
@@ -1740,8 +1869,8 @@ function OrdersTab() {
           data-testid="button-export-tracking-excel"
         >
           Tracking sheet <ExternalLink size={14} />
-        </button>
-        <button
+        </button> : null}
+        {can('payments') ? <button
           type="button"
           onClick={() => void checkPayments(false)}
           disabled={reconcile.busy}
@@ -1749,7 +1878,7 @@ function OrdersTab() {
           data-testid="button-check-payments"
         >
           {reconcile.busy ? 'Checking…' : 'Check payments'} <Check size={14} />
-        </button>
+        </button> : null}
         </div>
       </div>
       {reconcile.message ? <p className="mt-3 rounded-lg bg-[#3f8f5f]/10 px-4 py-2 text-xs text-[#2f6b46]" data-testid="text-reconcile-message">{reconcile.message}</p> : null}
@@ -1807,6 +1936,8 @@ function OrdersTab() {
           <option value="paid">Paid</option>
           <option value="pending">Payment pending</option>
           <option value="failed">Payment failed</option>
+          <option value="refunded">Refunded</option>
+          <option value="partially_refunded">Partly refunded</option>
         </select>
         <input type="date" value={fromDate} max={toDate || undefined} onChange={(e) => setFromDate(e.target.value)} className="rounded-lg border border-[#decdb9] bg-white px-3 py-2 text-xs outline-none" aria-label="From date" data-testid="input-filter-from" />
         <input type="date" value={toDate} min={fromDate || undefined} onChange={(e) => setToDate(e.target.value)} className="rounded-lg border border-[#decdb9] bg-white px-3 py-2 text-xs outline-none" aria-label="To date" data-testid="input-filter-to" />
@@ -1819,7 +1950,7 @@ function OrdersTab() {
         {visibleOrders?.map((order) => <OrderSummaryRow key={order.id} order={order} onOpen={() => setSelectedId(order.id)} />)}
       </div>
       {selectedOrder && !editingOrder ? (
-        <OrderDetailModal order={selectedOrder} onClose={() => setSelectedId(null)} onEdit={canEditOrder(selectedOrder) ? () => setEditingOrder(selectedOrder) : undefined} />
+        <OrderDetailModal order={selectedOrder} onClose={() => setSelectedId(null)} onEdit={can('orders.edit') && canEditOrder(selectedOrder) ? () => setEditingOrder(selectedOrder) : undefined} />
       ) : null}
       {adding ? (
         <ManualOrderModal
@@ -1841,6 +1972,7 @@ function OrdersTab() {
 type RateTierDraft = { weightGrams: number; price: number };
 
 function SettingsTab() {
+  const can = useCan();
   const { data: settings, isLoading } = useAdminGetSettings();
   const queryClient = useQueryClient();
   const [rateTable, setRateTable] = useState<RateTierDraft[]>([]);
@@ -1913,6 +2045,7 @@ function SettingsTab() {
 
   return (
     <div className="mx-auto max-w-[700px] px-5 py-10 sm:px-8">
+      {can('settings') ? <>
       <h2 className="serif text-2xl text-[#67232d]">Shipping settings</h2>
 
       <div className="mt-6 rounded-[1.5rem] border border-[#decdb9] bg-white p-6 sm:p-8">
@@ -1975,8 +2108,9 @@ function SettingsTab() {
           {updateSettings.isPending ? 'Saving…' : saved ? 'Saved' : 'Save settings'} <Check size={16} />
         </button>
       </div>
+      </> : null}
 
-      <div className="mt-6 rounded-[1.5rem] border border-[#decdb9] bg-white p-6 sm:p-8">
+      {can('packing') ? <div className="mt-6 rounded-[1.5rem] border border-[#decdb9] bg-white p-6 sm:p-8">
         <p className="mono text-[10px] uppercase tracking-[.18em] text-[#9a7564]">Packing team WhatsApp alerts</p>
         <p className="mt-2 text-xs text-[#9a7564]">Everyone added here gets a WhatsApp message with the order number and items whenever a new order comes in — just what's needed to pack it, nothing else.</p>
 
@@ -2022,7 +2156,7 @@ function SettingsTab() {
             <Plus size={14} /> Add
           </button>
         </div>
-      </div>
+      </div> : null}
     </div>
   );
 }
@@ -2345,6 +2479,148 @@ function AnalyticsTab() {
   );
 }
 
+type TeamUser = { id: string; email: string; name: string | null; phone: string | null; role: string; active: boolean; createdAt: string };
+type AuditRow = { id: string; adminEmail: string; role: string; action: string; target: string | null; detail: string | null; createdAt: string };
+
+const ROLE_OPTIONS = [
+  { id: 'superadmin', label: 'Superadmin', hint: 'Everything, including managing the team' },
+  { id: 'finance', label: 'Finance', hint: 'Orders (view/edit), invoices, payments, analytics, Excel export' },
+  { id: 'logistics', label: 'Logistics', hint: 'View orders and WhatsApp chats only' },
+];
+
+async function teamFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`/api/admin${path}`, { credentials: 'same-origin', ...init, headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) } });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(data?.error ?? 'Something went wrong.');
+  return data as T;
+}
+
+function TeamTab({ myEmail }: { myEmail: string }) {
+  const queryClient = useQueryClient();
+  const { data: users, isLoading } = useQuery({ queryKey: ['admin-team'], queryFn: () => teamFetch<TeamUser[]>('/users') });
+  const { data: audit } = useQuery({ queryKey: ['admin-audit'], queryFn: () => teamFetch<AuditRow[]>('/audit-log') });
+  const [form, setForm] = useState({ name: '', email: '', phone: '', role: 'finance', password: '' });
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [resetFor, setResetFor] = useState<string | null>(null);
+  const [newPassword, setNewPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const refresh = () => { queryClient.invalidateQueries({ queryKey: ['admin-team'] }); queryClient.invalidateQueries({ queryKey: ['admin-audit'] }); };
+
+  const run = async (action: () => Promise<unknown>, success: string) => {
+    setBusy(true);
+    setMessage(null);
+    try {
+      await action();
+      setMessage({ ok: true, text: success });
+      refresh();
+    } catch (err) {
+      setMessage({ ok: false, text: err instanceof Error ? err.message : 'Something went wrong.' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const addUser = (event: React.FormEvent) => {
+    event.preventDefault();
+    void run(async () => {
+      await teamFetch('/users', { method: 'POST', body: JSON.stringify({ ...form, phone: form.phone.trim() || null }) });
+      setForm({ name: '', email: '', phone: '', role: 'finance', password: '' });
+    }, 'Login created. Share the email and password with them privately.');
+  };
+
+  const patch = (id: string, body: Record<string, unknown>, success: string) =>
+    run(() => teamFetch(`/users/${id}`, { method: 'PATCH', body: JSON.stringify(body) }), success);
+
+  const field = 'mt-1.5 w-full rounded-lg border border-[#decdb9] bg-white px-3 py-2 text-sm outline-none focus:border-[#c9a15a]';
+  const label = 'mono text-[10px] uppercase tracking-[.14em] text-[#9a7564]';
+
+  return (
+    <div className="mx-auto max-w-[900px] px-5 py-10 sm:px-8" data-testid="tab-team-content">
+      <h2 className="serif text-2xl text-[#67232d]">Team & access</h2>
+      <p className="mt-1 text-xs text-[#9a7564]">Each person gets their own login. What they can see and do depends on their role.</p>
+
+      {message ? <p className={`mt-4 rounded-lg px-4 py-2 text-xs ${message.ok ? 'bg-[#3f8f5f]/10 text-[#2f6b46]' : 'bg-[#b83a36]/10 text-[#b83a36]'}`} data-testid="text-team-message">{message.text}</p> : null}
+
+      <div className="mt-6 space-y-3">
+        {isLoading ? <p className="text-sm text-[#9a7564]">Loading…</p> : null}
+        {users?.map((user) => {
+          const isMe = user.email === myEmail;
+          return (
+            <div key={user.id} className={`rounded-[1.25rem] border bg-white p-4 ${user.active ? 'border-[#decdb9]' : 'border-[#decdb9] opacity-60'}`} data-testid={`row-user-${user.email}`}>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-[#67232d]">{user.name ?? '—'} {isMe ? <span className="text-[10px] font-normal text-[#9a7564]">(you)</span> : null}{!user.active ? <span className="ml-2 rounded-full bg-[#b83a36]/15 px-2 py-0.5 text-[10px] font-semibold uppercase text-[#b83a36]">Deactivated</span> : null}</p>
+                  <p className="truncate text-xs text-[#9a7564]">{user.email}{user.phone ? ` · ${user.phone}` : ''}</p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    value={user.role}
+                    disabled={busy || isMe}
+                    onChange={(e) => void patch(user.id, { role: e.target.value }, `${user.email} is now ${e.target.value}.`)}
+                    className="rounded-lg border border-[#decdb9] bg-white px-3 py-2 text-xs capitalize outline-none disabled:opacity-60"
+                    aria-label={`Role for ${user.email}`}
+                    title={isMe ? "You can't change your own role" : undefined}
+                  >
+                    {ROLE_OPTIONS.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
+                  </select>
+                  <button type="button" onClick={() => { setResetFor(resetFor === user.id ? null : user.id); setNewPassword(''); }} className="rounded-full border border-[#decdb9] px-4 py-2 text-xs font-semibold text-[#67232d] hover:border-[#c9a15a]">Reset password</button>
+                  {!isMe ? (
+                    <button type="button" disabled={busy} onClick={() => void patch(user.id, { active: !user.active }, user.active ? `${user.email} can no longer log in.` : `${user.email} can log in again.`)} className="rounded-full border border-[#decdb9] px-4 py-2 text-xs font-semibold text-[#b83a36] hover:border-[#b83a36] disabled:opacity-60">
+                      {user.active ? 'Deactivate' : 'Reactivate'}
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+              {resetFor === user.id ? (
+                <form className="mt-3 flex flex-wrap items-end gap-2" onSubmit={(e) => { e.preventDefault(); void patch(user.id, { password: newPassword }, `Password changed for ${user.email}. Share it privately.`).then(() => setResetFor(null)); }}>
+                  <label className="block flex-1"><span className={label}>New password (min 8 characters)</span><input type="text" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} minLength={8} required className={field} /></label>
+                  <button type="submit" disabled={busy} className="rounded-full bg-[#67232d] px-5 py-2.5 text-xs font-semibold uppercase tracking-[.12em] text-[#f9e7c5] disabled:opacity-60">Save password</button>
+                </form>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+
+      <form onSubmit={addUser} className="mt-8 rounded-[1.5rem] border border-[#decdb9] bg-white p-6" data-testid="form-add-user">
+        <p className={label}>Add a person</p>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <label className="block"><span className="text-xs text-[#775e53]">Name *</span><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required className={field} data-testid="input-user-name" /></label>
+          <label className="block"><span className="text-xs text-[#775e53]">Email (their login) *</span><input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required className={field} data-testid="input-user-email" /></label>
+          <label className="block"><span className="text-xs text-[#775e53]">WhatsApp number (for WhatsApp login later)</span><input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} inputMode="tel" className={field} /></label>
+          <label className="block"><span className="text-xs text-[#775e53]">Password * (min 8 characters)</span><input type="text" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} minLength={8} required className={field} data-testid="input-user-password" /></label>
+          <div className="sm:col-span-2">
+            <span className="text-xs text-[#775e53]">Role *</span>
+            <div className="mt-1.5 grid gap-2 sm:grid-cols-3">
+              {ROLE_OPTIONS.map((r) => (
+                <button key={r.id} type="button" onClick={() => setForm({ ...form, role: r.id })} className={`rounded-xl border px-3 py-3 text-left transition-colors ${form.role === r.id ? 'border-[#67232d] bg-[#67232d] text-[#f9e7c5]' : 'border-[#decdb9] text-[#775e53] hover:border-[#c9a15a]'}`} data-testid={`button-role-${r.id}`}>
+                  <span className="block text-xs font-semibold">{r.label}</span>
+                  <span className={`mt-0.5 block text-[10px] ${form.role === r.id ? 'text-[#d9bfa9]' : 'text-[#9a7564]'}`}>{r.hint}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+        <button type="submit" disabled={busy} className="mt-4 flex items-center gap-2 rounded-full bg-[#67232d] px-6 py-3 text-xs font-semibold uppercase tracking-[.12em] text-[#f9e7c5] disabled:opacity-60" data-testid="button-add-user">Create login <Plus size={14} /></button>
+      </form>
+
+      <div className="mt-8 rounded-[1.5rem] border border-[#decdb9] bg-white p-6" data-testid="card-audit-log">
+        <p className={label}>Recent activity</p>
+        <div className="mt-3 max-h-[360px] overflow-y-auto">
+          {!audit?.length ? <p className="text-xs text-[#9a7564]">Nothing recorded yet.</p> : null}
+          {audit?.map((row) => (
+            <div key={row.id} className="flex flex-wrap items-baseline justify-between gap-x-4 border-b border-[#efe6d8] py-2 text-xs">
+              <span className="text-[#67232d]"><span className="font-semibold">{row.adminEmail}</span> <span className="text-[#9a7564]">({row.role})</span> · {row.action}{row.target ? ` · ${row.target}` : ''}{row.detail ? <span className="text-[#775e53]"> — {row.detail}</span> : null}</span>
+              <span className="mono text-[10px] text-[#9a7564]">{new Date(row.createdAt).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true })}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function AdminPage() {
   const [, navigate] = useLocation();
   const { data: me, isLoading, isError } = useAdminMe();
@@ -2353,6 +2629,12 @@ export function AdminPage() {
   useEffect(() => {
     if (!isLoading && isError) navigate('/admin/login');
   }, [isLoading, isError, navigate]);
+
+  // Land on the first tab this person is allowed to use (e.g. finance has no Products tab).
+  const allowedTabs = me ? ALL_TABS.filter((t) => t.needs.some((permission) => me.permissions.includes(permission))) : [];
+  useEffect(() => {
+    if (me && allowedTabs.length > 0 && !allowedTabs.some((t) => t.id === tab)) setTab(allowedTabs[0]!.id);
+  }, [me, tab]);
 
   if (isLoading) {
     return (
@@ -2365,14 +2647,18 @@ export function AdminPage() {
   if (!me) return null;
 
   return (
-    <AdminShell>
-      <AdminHeader email={me.email} />
-      <AdminTabs tab={tab} onChange={setTab} />
-      {tab === 'products' ? <ProductsTab /> : null}
-      {tab === 'orders' ? <OrdersTab /> : null}
-      {tab === 'whatsapp' ? <WhatsAppTab /> : null}
-      {tab === 'analytics' ? <AnalyticsTab /> : null}
-      {tab === 'settings' ? <SettingsTab /> : null}
-    </AdminShell>
+    <PermsContext.Provider value={me.permissions}>
+      <AdminShell>
+        <AdminHeader email={me.email} name={me.name} role={me.role} />
+        <AdminTabs tab={tab} onChange={setTab} />
+        {allowedTabs.length === 0 ? <p className="p-8 text-sm text-[#9a7564]">Your role doesn't have access to anything yet. Ask a superadmin.</p> : null}
+        {tab === 'products' ? <ProductsTab /> : null}
+        {tab === 'orders' ? <OrdersTab /> : null}
+        {tab === 'whatsapp' ? <WhatsAppTab /> : null}
+        {tab === 'analytics' ? <AnalyticsTab /> : null}
+        {tab === 'settings' ? <SettingsTab /> : null}
+        {tab === 'team' ? <TeamTab myEmail={me.email} /> : null}
+      </AdminShell>
+    </PermsContext.Provider>
   );
 }

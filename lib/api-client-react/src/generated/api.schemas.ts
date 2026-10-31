@@ -22,8 +22,21 @@ export interface AdminLoginRequest {
   password: string;
 }
 
+export type AdminMeRole = typeof AdminMeRole[keyof typeof AdminMeRole];
+
+
+export const AdminMeRole = {
+  superadmin: 'superadmin',
+  finance: 'finance',
+  logistics: 'logistics',
+} as const;
+
 export interface AdminMe {
   email: string;
+  name?: string | null;
+  role: AdminMeRole;
+  /** What this person may do, e.g. orders.edit, orders.ship, analytics */
+  permissions: string[];
 }
 
 export interface OtpRequestInput {

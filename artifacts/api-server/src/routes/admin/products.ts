@@ -15,7 +15,7 @@ import {
   AdminAddProductImageResponse,
   AdminDeleteProductImageResponse,
 } from "@workspace/api-zod";
-import { requireAdmin } from "../../middlewares/require-admin";
+import { requireAdmin, requirePermission } from "../../middlewares/require-admin";
 import { shapeProduct } from "../../lib/product-shape";
 import { presignProductImageUpload, publicUrlForObjectKey } from "../../lib/storage";
 
@@ -50,7 +50,7 @@ async function replaceVariants(productId: string, variants: z.infer<typeof Admin
   );
 }
 
-router.get("/products", async (_req, res) => {
+router.get("/products", requirePermission("products", "orders.edit"), async (_req, res) => {
   const products = await db.select().from(productsTable);
   const { variants, images } = await loadDetails(products.map((product) => product.id));
 
@@ -64,7 +64,7 @@ router.get("/products", async (_req, res) => {
   res.json(AdminListProductsResponse.parse(shaped));
 });
 
-router.post("/products", async (req, res) => {
+router.post("/products", requirePermission("products"), async (req, res) => {
   const parsed = AdminCreateProductBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid request" });
@@ -92,7 +92,7 @@ router.post("/products", async (req, res) => {
   res.status(201).json(AdminCreateProductResponse.parse(shapeProduct(product, savedVariants, images)));
 });
 
-router.patch("/products/:id", async (req, res) => {
+router.patch("/products/:id", requirePermission("products"), async (req, res) => {
   const { id } = req.params;
   const parsed = AdminUpdateProductBody.safeParse(req.body);
   if (!parsed.success) {
@@ -125,7 +125,7 @@ router.patch("/products/:id", async (req, res) => {
   res.json(AdminUpdateProductResponse.parse(shapeProduct(product, savedVariants, images)));
 });
 
-router.delete("/products/:id", async (req, res) => {
+router.delete("/products/:id", requirePermission("products"), async (req, res) => {
   const { id } = req.params;
   const deleted = await db.delete(productsTable).where(eq(productsTable.id, id)).returning({ id: productsTable.id });
   if (deleted.length === 0) {
@@ -135,7 +135,7 @@ router.delete("/products/:id", async (req, res) => {
   res.json(AdminDeleteProductResponse.parse({ ok: true }));
 });
 
-router.post("/uploads/presign", async (req, res) => {
+router.post("/uploads/presign", requirePermission("products"), async (req, res) => {
   const parsed = AdminPresignUploadBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid request" });
@@ -145,7 +145,7 @@ router.post("/uploads/presign", async (req, res) => {
   res.json(AdminPresignUploadResponse.parse(result));
 });
 
-router.post("/products/:id/images", async (req, res) => {
+router.post("/products/:id/images", requirePermission("products"), async (req, res) => {
   const { id } = req.params;
   const parsed = AdminAddProductImageBody.safeParse(req.body);
   if (!parsed.success) {
@@ -188,7 +188,7 @@ router.post("/products/:id/images", async (req, res) => {
   );
 });
 
-router.delete("/products/:id/images/:imageId", async (req, res) => {
+router.delete("/products/:id/images/:imageId", requirePermission("products"), async (req, res) => {
   const { id, imageId } = req.params;
   const deleted = await db
     .delete(productImagesTable)

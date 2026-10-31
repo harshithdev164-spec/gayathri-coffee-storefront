@@ -33,9 +33,23 @@ const templates = [
       },
     ],
   },
+  {
+    // Admin login code. Meta's authentication format: fixed wording, a "copy code" button, and
+    // authentication templates are normally approved within seconds.
+    name: "gc_admin_otp_v1",
+    category: "AUTHENTICATION",
+    language: "en",
+    components: [
+      { type: "BODY", add_security_recommendation: true },
+      { type: "FOOTER", code_expiration_minutes: 5 },
+      { type: "BUTTONS", buttons: [{ type: "OTP", otp_type: "COPY_CODE" }] },
+    ],
+  },
 ];
 
-for (const template of templates) {
+// Pass template names as arguments to submit only those, e.g. `... gc_admin_otp_v1`.
+const only = process.argv.slice(2);
+for (const template of templates.filter((t) => only.length === 0 || only.includes(t.name))) {
   const res = await fetch(`https://graph.facebook.com/v22.0/${wabaId}/message_templates`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },

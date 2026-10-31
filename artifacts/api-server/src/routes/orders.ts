@@ -3,7 +3,8 @@ import { eq } from "drizzle-orm";
 import { db, pendingCheckoutsTable } from "@workspace/db";
 import { CreateOrderBody, CreateOrderResponse } from "@workspace/api-zod";
 import { shapeOrder } from "../lib/order-shape";
-import { verifyRazorpaySignature } from "../lib/razorpay";
+import { fetchRazorpayPayment, paymentMismatch, verifyRazorpaySignature } from "../lib/razorpay";
+import { logger } from "../lib/logger";
 import { CheckoutPayload, createOrder } from "../lib/order-create";
 
 const router: IRouter = Router();
@@ -41,6 +42,24 @@ router.post("/orders", async (req, res) => {
       const saved = CheckoutPayload.safeParse(pending.payload);
       if (saved.success) payload = saved.data;
       orderNumber = pending.orderNumber;
+    }
+  }
+
+  // A valid signature proves a payment happened, but not that it was for THIS order's amount. Ask Razorpay
+  // directly, so an order can never be marked paid for less than its total (or for a failed payment).
+  if (razorpay) {
+    try {
+      const mismatch = paymentMismatch(await fetchRazorpayPayment(razorpay.paymentId), razorpay.orderId, payload.total);
+      if (mismatch) {
+        logger.error({ razorpayOrderId: razorpay.orderId, mismatch }, "Order rejected: payment does not match the order");
+        res.status(400).json({ error: "We could not confirm that payment for this order. If money was deducted, it will be matched automatically or refunded." });
+        return;
+      }
+    } catch (err) {
+      // Razorpay unreachable: fail closed. The browser retries, and the webhook also creates the order.
+      logger.error({ err, razorpayOrderId: razorpay.orderId }, "Could not confirm the payment with Razorpay");
+      res.status(502).json({ error: "We could not confirm your payment yet. Please wait a moment - we are retrying." });
+      return;
     }
   }
 

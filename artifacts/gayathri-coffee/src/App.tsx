@@ -29,7 +29,7 @@ import logoPath from '@assets/Gayathri_Coffee_Logo_1789394897707.png';
 import heroPath from '@assets/hero-poster.png';
 import CircularCarousel from './components/CircularCarousel';
 import lottie from 'lottie-web';
-import { useListProducts, useGetShippingSettings, useGetIndiaPostRate, getGetIndiaPostRateQueryKey, useCreateOrder, useGetPaymentSettings, useCreateRazorpayOrder, type ProductWithDetails } from '@workspace/api-client-react';
+import { useListProducts, useGetShippingSettings, useGetIndiaPostRate, getGetIndiaPostRateQueryKey, useGetShiprocketRate, getGetShiprocketRateQueryKey, useCreateOrder, useGetPaymentSettings, useCreateRazorpayOrder, type ProductWithDetails } from '@workspace/api-client-react';
 import { AdminLoginPage, AdminPage } from './Admin';
 
 const leafIcons = Array.from({ length: 8 }, (_, i) => `/icons/leaf-${String(i + 1).padStart(2, '0')}.svg`);
@@ -1947,7 +1947,7 @@ function CustomRoastPage() {
   );
 }
 
-type ShippingMethod = 'india_post';
+type ShippingMethod = 'shiprocket' | 'india_post';
 // No extra packaging charge is added to orders any more (kept at 0 so older code paths still work).
 const PACKAGING_FEE = 0;
 
@@ -2005,7 +2005,7 @@ function CheckoutPage() {
   const [billingState, setBillingState] = useState('');
   const [billingPincode, setBillingPincode] = useState('');
   const [notes, setNotes] = useState('');
-  const shippingMethod: ShippingMethod = 'india_post';
+  const [shippingMethod, setShippingMethod] = useState<ShippingMethod>('india_post');
   // No COD — every order pays online through Razorpay.
   const payment = 'Online';
   const [placed, setPlaced] = useState(false);
@@ -2034,7 +2034,20 @@ function CheckoutPage() {
   });
   const indiaPostFee = liveIndiaPostRate?.amount ?? lookupIndiaPostFee(totalWeightGrams, indiaPostRateTable);
 
-  const deliveryFee = indiaPostFee;
+  // Shiprocket quotes come from Shiprocket's own rate calculator. When it can't quote (the pincode isn't
+  // serviceable, or Shiprocket is unreachable) the server answers with a flat estimate - never offer
+  // Shiprocket in that case, since the parcel could not be booked.
+  const shiprocketRateParams = { pincode: pincode.trim(), weightGrams: totalWeightGrams, cod: false };
+  const { data: liveShiprocketRate, isFetching: shiprocketRateLoading } = useGetShiprocketRate(shiprocketRateParams, {
+    query: { enabled: pincodeValid && totalWeightGrams > 0, queryKey: getGetShiprocketRateQueryKey(shiprocketRateParams) },
+  });
+  const shiprocketAvailable = pincodeValid && liveShiprocketRate?.source === 'shiprocket_api';
+  const shiprocketFee = liveShiprocketRate?.amount ?? 0;
+  useEffect(() => {
+    if (shippingMethod === 'shiprocket' && pincodeValid && !shiprocketRateLoading && !shiprocketAvailable) setShippingMethod('india_post');
+  }, [shippingMethod, pincodeValid, shiprocketRateLoading, shiprocketAvailable]);
+
+  const deliveryFee = shippingMethod === 'shiprocket' && shiprocketAvailable ? shiprocketFee : indiaPostFee;
   const total = subtotal + deliveryFee + PACKAGING_FEE;
 
   const createOrder = useCreateOrder({
@@ -2123,19 +2136,27 @@ function CheckoutPage() {
         prefill: { name: fullName.trim(), contact: phone.trim(), email: email.trim() },
         theme: { color: '#67232d' },
         handler: (response) => {
-          createOrder.mutate(
-            {
-              data: buildOrderPayload({
-                razorpayOrderId: response.razorpay_order_id,
-                razorpayPaymentId: response.razorpay_payment_id,
-                razorpaySignature: response.razorpay_signature,
-              }),
-            },
-            {
-              // The money has already been taken - the server creates the order from Razorpay's confirmation too.
-              onError: () => setPlaceError('Your payment was received. We are confirming your order and will message you shortly - please do not pay again.'),
-            },
-          );
+          // The money has been taken, so keep trying to record the order: placing it is safe to repeat (the
+          // server returns the same order for the same payment). The server also creates the order from
+          // Razorpay's own confirmation, so even if every attempt here fails the order still appears.
+          const data = buildOrderPayload({
+            razorpayOrderId: response.razorpay_order_id,
+            razorpayPaymentId: response.razorpay_payment_id,
+            razorpaySignature: response.razorpay_signature,
+          });
+          void (async () => {
+            const delays = [0, 1500, 4000, 9000];
+            for (const delay of delays) {
+              if (delay) await new Promise((resolve) => window.setTimeout(resolve, delay));
+              try {
+                await createOrder.mutateAsync({ data });
+                return;
+              } catch {
+                /* try again */
+              }
+            }
+            setPlaceError('Your payment was received. We are confirming your order and will message you shortly - please do not pay again.');
+          })();
         },
         modal: { ondismiss: () => setPlaceError('Payment was cancelled.') },
       });
@@ -2277,18 +2298,37 @@ function CheckoutPage() {
 
             <div className="rounded-[1.5rem] border border-[#decdb9] bg-white p-6 sm:p-8">
               <p className="mono text-[10px] uppercase tracking-[.18em] text-[#9a7564]">Shipping method</p>
-              <div className="mt-4">
-                <div
-                  className="rounded-xl border border-[#67232d] bg-[#67232d] px-4 py-4 text-left text-[#f9e7c5]"
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => setShippingMethod('india_post')}
+                  className={`rounded-xl border px-4 py-4 text-left transition-colors ${shippingMethod === 'india_post' ? 'border-[#67232d] bg-[#67232d] text-[#f9e7c5]' : 'border-[#decdb9] text-[#775e53] hover:border-[#c9a15a]'}`}
                   data-testid="button-shipping-india-post"
                 >
                   <span className="block text-sm font-semibold">Standard delivery</span>
-                  <span className="mt-1 block text-xs text-[#d9bfa9]">Regular post · 5-8 business days</span>
+                  <span className={`mt-1 block text-xs ${shippingMethod === 'india_post' ? 'text-[#d9bfa9]' : 'text-[#9a7564]'}`}>Regular post · 5-8 business days</span>
                   <span className="mono mt-2 block text-sm">
                     {pincodeValid && indiaPostRateLoading ? 'Calculating…' : formatPrice(indiaPostFee)}
                   </span>
-                  {!pincodeValid ? <span className="mt-1 block text-[10px] text-[#d9bfa9]/70">Enter your pincode above for an exact rate</span> : null}
-                </div>
+                  {!pincodeValid ? <span className={`mt-1 block text-[10px] ${shippingMethod === 'india_post' ? 'text-[#d9bfa9]/70' : 'text-[#9a7564]/80'}`}>Enter your pincode above for an exact rate</span> : null}
+                </button>
+                <button
+                  type="button"
+                  disabled={pincodeValid && !shiprocketRateLoading && !shiprocketAvailable}
+                  onClick={() => setShippingMethod('shiprocket')}
+                  className={`rounded-xl border px-4 py-4 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${shippingMethod === 'shiprocket' ? 'border-[#67232d] bg-[#67232d] text-[#f9e7c5]' : 'border-[#decdb9] text-[#775e53] hover:border-[#c9a15a]'}`}
+                  data-testid="button-shipping-shiprocket"
+                >
+                  <span className="block text-sm font-semibold">Express delivery</span>
+                  <span className={`mt-1 block text-xs ${shippingMethod === 'shiprocket' ? 'text-[#d9bfa9]' : 'text-[#9a7564]'}`}>
+                    Courier via Shiprocket{liveShiprocketRate?.source === 'shiprocket_api' && liveShiprocketRate.etd ? ` · arrives by ${liveShiprocketRate.etd}` : ' · 2-4 business days'}
+                  </span>
+                  <span className="mono mt-2 block text-sm">
+                    {!pincodeValid ? '—' : shiprocketRateLoading ? 'Calculating…' : shiprocketAvailable ? formatPrice(shiprocketFee) : 'Not available'}
+                  </span>
+                  {!pincodeValid ? <span className={`mt-1 block text-[10px] ${shippingMethod === 'shiprocket' ? 'text-[#d9bfa9]/70' : 'text-[#9a7564]/80'}`}>Enter your pincode above to see the rate</span> : null}
+                  {pincodeValid && !shiprocketRateLoading && !shiprocketAvailable ? <span className="mt-1 block text-[10px] text-[#9a7564]/80">Express courier doesn't reach this pincode - use standard delivery</span> : null}
+                </button>
               </div>
             </div>
 

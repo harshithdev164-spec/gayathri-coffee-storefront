@@ -27,7 +27,10 @@ export const AdminLoginBody = zod.object({
 })
 
 export const AdminLoginResponse = zod.object({
-  "email": zod.string().email()
+  "email": zod.string().email(),
+  "name": zod.string().nullish(),
+  "role": zod.enum(['superadmin', 'finance', 'logistics']),
+  "permissions": zod.array(zod.string()).describe('What this person may do, e.g. orders.edit, orders.ship, analytics')
 })
 
 
@@ -54,7 +57,10 @@ export const AdminVerifyOtpBody = zod.object({
 })
 
 export const AdminVerifyOtpResponse = zod.object({
-  "email": zod.string().email()
+  "email": zod.string().email(),
+  "name": zod.string().nullish(),
+  "role": zod.enum(['superadmin', 'finance', 'logistics']),
+  "permissions": zod.array(zod.string()).describe('What this person may do, e.g. orders.edit, orders.ship, analytics')
 })
 
 
@@ -72,7 +78,10 @@ export const AdminLogoutResponse = zod.object({
  * @summary Current admin session
  */
 export const AdminMeResponse = zod.object({
-  "email": zod.string().email()
+  "email": zod.string().email(),
+  "name": zod.string().nullish(),
+  "role": zod.enum(['superadmin', 'finance', 'logistics']),
+  "permissions": zod.array(zod.string()).describe('What this person may do, e.g. orders.edit, orders.ship, analytics')
 })
 
 

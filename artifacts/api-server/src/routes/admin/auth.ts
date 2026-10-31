@@ -15,6 +15,21 @@ import {
 } from "@workspace/api-zod";
 import { setAdminSession, clearAdminSession, getAdminSession, isAdminAuthDisabled } from "../../lib/session";
 import { sendAdminOtpWhatsApp } from "../../lib/whatsapp";
+import { isRole, permissionsFor } from "../../lib/roles";
+import { db as database, auditLogTable } from "@workspace/db";
+import type { AdminUser } from "@workspace/db";
+
+// What the admin screen needs to know about the person who just logged in.
+function meBody(admin: Pick<AdminUser, "email" | "name" | "role">) {
+  const role = isRole(admin.role) ? admin.role : "logistics"; // an unknown role gets the least access
+  return { email: admin.email, name: admin.name, role, permissions: permissionsFor(role) };
+}
+
+const logLogin = (admin: AdminUser, how: string) =>
+  database
+    .insert(auditLogTable)
+    .values({ adminUserId: admin.id, adminEmail: admin.email, role: admin.role, action: "login", detail: how })
+    .catch(() => undefined);
 
 const OTP_TTL_MS = 5 * 60 * 1000;
 const MAX_OTP_ATTEMPTS = 5;
@@ -50,13 +65,14 @@ router.post("/admin/login", async (req, res) => {
     .limit(1);
 
   const valid = admin ? await bcrypt.compare(password, admin.passwordHash) : false;
-  if (!admin || !valid) {
+  if (!admin || !valid || !admin.active) {
     res.status(401).json({ error: "Invalid email or password" });
     return;
   }
 
   setAdminSession(res, admin.id);
-  res.json(AdminLoginResponse.parse({ email: admin.email }));
+  await logLogin(admin, "password");
+  res.json(AdminLoginResponse.parse(meBody(admin)));
 });
 
 router.post("/admin/login/request-otp", async (req, res) => {
@@ -73,8 +89,15 @@ router.post("/admin/login/request-otp", async (req, res) => {
     .limit(1);
 
   // Don't reveal whether the email matched an account.
-  if (!admin || !admin.phone) {
+  if (!admin || !admin.phone || !admin.active) {
     res.json(AdminRequestOtpResponse.parse({ sent: false }));
+    return;
+  }
+
+  // One code per minute per person - stops anyone spamming a colleague's WhatsApp (and your Meta bill).
+  const lastRequestedAt = admin.otpExpiresAt ? admin.otpExpiresAt.getTime() - OTP_TTL_MS : 0;
+  if (Date.now() - lastRequestedAt < 60_000) {
+    res.status(429).json({ error: "A code was just sent. Wait a minute before asking for another." });
     return;
   }
 
@@ -102,7 +125,7 @@ router.post("/admin/login/verify-otp", async (req, res) => {
     .where(eq(adminUsersTable.email, email.toLowerCase()))
     .limit(1);
 
-  if (!admin || !admin.otpCodeHash || !admin.otpExpiresAt) {
+  if (!admin || !admin.active || !admin.otpCodeHash || !admin.otpExpiresAt) {
     res.status(401).json({ error: "Invalid or expired code" });
     return;
   }
@@ -133,7 +156,8 @@ router.post("/admin/login/verify-otp", async (req, res) => {
     .where(eq(adminUsersTable.id, admin.id));
 
   setAdminSession(res, admin.id);
-  res.json(AdminVerifyOtpResponse.parse({ email: admin.email }));
+  await logLogin(admin, "whatsapp code");
+  res.json(AdminVerifyOtpResponse.parse(meBody(admin)));
 });
 
 router.post("/admin/logout", (_req, res) => {
@@ -143,7 +167,7 @@ router.post("/admin/logout", (_req, res) => {
 
 router.get("/admin/me", async (req, res) => {
   if (isAdminAuthDisabled()) {
-    res.json(AdminMeResponse.parse({ email: "local-dev@localhost.test" }));
+    res.json(AdminMeResponse.parse(meBody({ email: "local-dev@localhost.test", name: "Local dev", role: "superadmin" })));
     return;
   }
   const adminUserId = getAdminSession(req);
@@ -153,13 +177,13 @@ router.get("/admin/me", async (req, res) => {
   }
 
   const [admin] = await db.select().from(adminUsersTable).where(eq(adminUsersTable.id, adminUserId)).limit(1);
-  if (!admin) {
+  if (!admin || !admin.active) {
     clearAdminSession(res);
     res.status(401).json({ error: "Not authenticated" });
     return;
   }
 
-  res.json(AdminMeResponse.parse({ email: admin.email }));
+  res.json(AdminMeResponse.parse(meBody(admin)));
 });
 
 export default router;
