@@ -158,7 +158,7 @@ router.get("/webhooks/whatsapp", (req, res) => {
   res.sendStatus(403);
 });
 
-type WhatsAppStatus = { id: string; status: string };
+type WhatsAppStatus = { id: string; status: string; errors?: { code: number; title?: string; message?: string }[] };
 type WhatsAppInboundMessage = { id: string; from: string; type: string; text?: { body?: string } };
 type WhatsAppChange =
   | { field: "messages"; value: { statuses?: WhatsAppStatus[]; messages?: WhatsAppInboundMessage[] } }
@@ -200,7 +200,13 @@ router.post("/webhooks/whatsapp", async (req, res) => {
       } else if (change.field === "messages") {
         const v = change.value;
         for (const status of v.statuses ?? []) {
-          await db.update(whatsappEventsTable).set({ status: status.status }).where(eq(whatsappEventsTable.waMessageId, status.id));
+          // A failed message says why (e.g. 131026 not on WhatsApp, 131049 Meta limit) - keep that, it is the only place it shows up.
+          const error = status.errors?.[0];
+          await db
+            .update(whatsappEventsTable)
+            .set({ status: status.status, ...(error ? { body: `${error.code}: ${error.title ?? error.message ?? ""}`.slice(0, 500), payload: status } : {}) })
+            .where(eq(whatsappEventsTable.waMessageId, status.id));
+          if (error) logger.warn({ waMessageId: status.id, error }, "WhatsApp message failed");
         }
         for (const msg of v.messages ?? []) {
           // WhatsApp re-delivers a message until we answer 200 — don't reply to the same message twice.
